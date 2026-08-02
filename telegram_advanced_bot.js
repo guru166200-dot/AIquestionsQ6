@@ -1607,6 +1607,7 @@ function getSettingsKeyboard() {
       [{ text: '🔗 Update Notion Key', callback_data: 'update_notion_key' }],
       [{ text: '🆔 Update Notion ID', callback_data: 'update_notion_id' }],
       [{ text: '🔑 Update Gemini Key', callback_data: 'update_gemini_key' }],
+      [{ text: '🟣 Update Groq Key', callback_data: 'update_groq_key' }],
       [{ text: '🔑 Update OpenAI Key', callback_data: 'update_openai_key' }],
       [{ text: '🤖 Update Bot Token', callback_data: 'update_bot_token' }],
       [{ text: '🔙 Back to Menu', callback_data: 'main_menu' }]
@@ -1951,6 +1952,51 @@ bot.on('message', async (msg) => {
     return;
   }
 
+  if (input.step === 'update_groq_key') {
+    const tempKey = msg.text.trim();
+    bot.sendMessage(chatId, '🔍 <b>Testing Groq API Key...</b>', { parse_mode: 'HTML' });
+
+    try {
+      const res = await axios.post(
+        'https://api.groq.com/openai/v1/chat/completions',
+        { model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: 'hi' }], max_tokens: 2 },
+        { headers: { 'Authorization': `Bearer ${tempKey}`, 'Content-Type': 'application/json' }, timeout: 8000 }
+      );
+
+      if (res.data && res.data.choices) {
+        updateEnvFile('GROQ_API_KEY', tempKey);
+        process.env.GROQ_API_KEY = tempKey;
+        await bot.sendMessage(chatId,
+          `✅ <b>Groq Key Verified &amp; Saved!</b>\n\n🟣 <b>Model:</b> <code>Llama 3.3 70B (Versatile)</code>\n🔑 Your key has been saved and is now active.`,
+          { parse_mode: 'HTML', reply_markup: getMainKeyboard(chatId) }
+        );
+        // Refresh pinned dashboard with new status
+        updatePinnedTokenStatus(chatId, true).catch(() => {});
+      } else {
+        throw new Error('Unexpected response from Groq API.');
+      }
+    } catch (e) {
+      const errMsg = e.response?.data?.error?.message || e.message || 'Unknown Error';
+      const isQuota = errMsg.toLowerCase().includes('quota') || e.response?.status === 429;
+      if (isQuota) {
+        // Key is valid but quota hit — save it anyway
+        updateEnvFile('GROQ_API_KEY', tempKey);
+        process.env.GROQ_API_KEY = tempKey;
+        await bot.sendMessage(chatId,
+          `⚠️ <b>Groq Key Valid but Rate Limited</b>\n\nYour key is correct but you've hit the free-tier rate limit. It has been saved — try again in a minute.`,
+          { parse_mode: 'HTML', reply_markup: getMainKeyboard(chatId) }
+        );
+        updatePinnedTokenStatus(chatId, true).catch(() => {});
+      } else {
+        await bot.sendMessage(chatId,
+          `❌ <b>Groq Key Invalid</b>\n\nReason: ${escapeHTML(errMsg)}\n\n💡 Get a free key at <a href="https://console.groq.com/keys">console.groq.com/keys</a>`,
+          { parse_mode: 'HTML' }
+        );
+      }
+    }
+    topicInput.delete(chatId);
+    return;
+  }
 
   if (input.step === 'update_openai_key') {
     const tempKey = msg.text.trim();
@@ -2422,10 +2468,11 @@ Keep it strictly under 250 words, encouraging and clear!`;
       return;
     }
 
-    // Update Keys (Gemini, OpenAI, Notion, Bot Token)
-    if (['update_gemini_key', 'update_openai_key', 'update_notion_key', 'update_notion_id', 'update_bot_token'].includes(data)) {
+    // Update Keys (Gemini, Groq, OpenAI, Notion, Bot Token)
+    if (['update_gemini_key', 'update_groq_key', 'update_openai_key', 'update_notion_key', 'update_notion_id', 'update_bot_token'].includes(data)) {
       const labelMap = {
         'update_gemini_key': 'Gemini API Key',
+        'update_groq_key': 'Groq API Key (starts with gsk_...)',
         'update_openai_key': 'OpenAI API Key',
         'update_notion_key': 'Notion API Key',
         'update_notion_id': 'Notion Parent ID',
