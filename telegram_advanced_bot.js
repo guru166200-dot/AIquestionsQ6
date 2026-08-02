@@ -973,6 +973,40 @@ function isBankSetBasedHelper(exam, topic) {
   );
 }
 
+/**
+ * Robust JSON parser that strips markdown fences (```json ... ```), extracts clean JSON objects,
+ * and recovers from minor LLM formatting glitches.
+ */
+function safeParseJSON(rawText) {
+  if (!rawText || typeof rawText !== 'string') return null;
+  let text = rawText.trim();
+
+  // Try direct parse first
+  try {
+    return JSON.parse(text);
+  } catch (e) {}
+
+  // Strip markdown code fences if present
+  if (text.includes('```')) {
+    text = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+    try {
+      return JSON.parse(text);
+    } catch (e) {}
+  }
+
+  // Extract outer braces {}
+  const firstBrace = text.indexOf('{');
+  const lastBrace = text.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    const extracted = text.substring(firstBrace, lastBrace + 1);
+    try {
+      return JSON.parse(extracted);
+    } catch (e) {}
+  }
+
+  return null;
+}
+
 // ==================== PYQ (PREVIOUS YEAR QUESTIONS) ENGINE ====================
 // Auto-updating year range: 2010 → current year. No manual update needed.
 
@@ -1308,8 +1342,8 @@ async function generatePyqYearQuestions(examCatalogKey, year, section, subject, 
         );
         const data = response.data;
         if (data.candidates && data.candidates[0] && data.candidates[0].content) {
-          const parsed = JSON.parse(data.candidates[0].content.parts[0].text);
-          if (parsed.questions && parsed.questions.length > 0) {
+          const parsed = safeParseJSON(data.candidates[0].content.parts[0].text);
+          if (parsed && parsed.questions && parsed.questions.length > 0) {
             LAST_WORKING_GEMINI_MODEL = model;
             batchResult = { questions: parsed.questions, modelUsed: `Gemini (${model})` };
             const usage = data.usageMetadata || {};
@@ -1333,8 +1367,8 @@ async function generatePyqYearQuestions(examCatalogKey, year, section, subject, 
               model, response_format: { type: 'json_object' },
               messages: [{ role: 'system', content: sysPrompt }, { role: 'user', content: userPrompt }]
             }, { headers: { 'Authorization': `Bearer ${groqKey}`, 'Content-Type': 'application/json' }, timeout: 60000 });
-            const parsed = JSON.parse(resp.data.choices[0].message.content);
-            if (parsed.questions && parsed.questions.length > 0) {
+            const parsed = safeParseJSON(resp.data.choices[0].message.content);
+            if (parsed && parsed.questions && parsed.questions.length > 0) {
               batchResult = { questions: parsed.questions, modelUsed: `Groq (${model})` };
               break;
             }
@@ -1351,8 +1385,8 @@ async function generatePyqYearQuestions(examCatalogKey, year, section, subject, 
             model, response_format: { type: 'json_object' },
             messages: [{ role: 'system', content: sysPrompt }, { role: 'user', content: userPrompt }]
           }, { headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_API_KEY}` }, timeout: 60000 });
-          const parsed = JSON.parse(resp.data.choices[0].message.content);
-          if (parsed.questions && parsed.questions.length > 0) {
+          const parsed = safeParseJSON(resp.data.choices[0].message.content);
+          if (parsed && parsed.questions && parsed.questions.length > 0) {
             batchResult = { questions: parsed.questions, modelUsed: `ChatGPT (${model})` };
             break;
           }
@@ -1504,11 +1538,16 @@ async function startPyqSession(chatId, examKey, year) {
       ).catch(() => {});
     } catch(e) {}
 
-    const result = await generatePyqYearQuestions(examKey, year, sec.name, sec.subject, sec.questions, secIdx);
+    let result = await generatePyqYearQuestions(examKey, year, sec.name, sec.subject, sec.questions, secIdx);
+
+    if (!result || !result.questions || result.questions.length === 0) {
+      console.warn(`[PYQ] Specialized generator failed for ${sec.name}. Falling back to standard question generator...`);
+      result = await generateQuestions(sec.name, catalog.examKey, sec.subject, sec.questions, null, null, chatId);
+    }
 
     if (!result || !result.questions || result.questions.length === 0) {
       bot.editMessageText(
-        `❌ <b>Generation Failed!</b>\n\nCould not reconstruct questions for:\n<b>${escapeHTML(sec.name)}</b>\n\nPlease try a different year or use Full Mock Exam instead.`,
+        `❌ <b>Generation Failed!</b>\n\nCould not reconstruct questions for:\n<b>${escapeHTML(sec.name)}</b>\n\nPlease try again in a few moments.`,
         { chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'HTML' }
       ).catch(() => {});
       return;
@@ -1789,8 +1828,8 @@ async function generateMockSectionQuestions(exam, section, subject, count, patte
         );
         const data = response.data;
         if (data.candidates && data.candidates[0] && data.candidates[0].content) {
-          const parsed = JSON.parse(data.candidates[0].content.parts[0].text);
-          if (parsed.questions && parsed.questions.length > 0) {
+          const parsed = safeParseJSON(data.candidates[0].content.parts[0].text);
+          if (parsed && parsed.questions && parsed.questions.length > 0) {
             LAST_WORKING_GEMINI_MODEL = model;
             batchResult = { questions: parsed.questions, modelUsed: `Gemini (${model})` };
             const usage = data.usageMetadata || {};
@@ -1816,8 +1855,8 @@ async function generateMockSectionQuestions(exam, section, subject, count, patte
               response_format: { type: 'json_object' },
               messages: [{ role: 'system', content: sysPrompt }, { role: 'user', content: userPrompt }]
             }, { headers: { 'Authorization': `Bearer ${groqKey}`, 'Content-Type': 'application/json' }, timeout: 60000 });
-            const parsed = JSON.parse(resp.data.choices[0].message.content);
-            if (parsed.questions && parsed.questions.length > 0) {
+            const parsed = safeParseJSON(resp.data.choices[0].message.content);
+            if (parsed && parsed.questions && parsed.questions.length > 0) {
               batchResult = { questions: parsed.questions, modelUsed: `Groq (${model})` };
               const usage = resp.data.usage || {};
               recordTokenUsage(`Groq (${model})`, { promptTokens: usage.prompt_tokens || 0, completionTokens: usage.completion_tokens || 0, totalTokens: usage.total_tokens || 0 });
@@ -1840,8 +1879,8 @@ async function generateMockSectionQuestions(exam, section, subject, count, patte
             response_format: { type: 'json_object' },
             messages: [{ role: 'system', content: sysPrompt }, { role: 'user', content: userPrompt }]
           }, { headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_API_KEY}` }, timeout: 60000 });
-          const parsed = JSON.parse(resp.data.choices[0].message.content);
-          if (parsed.questions && parsed.questions.length > 0) {
+          const parsed = safeParseJSON(resp.data.choices[0].message.content);
+          if (parsed && parsed.questions && parsed.questions.length > 0) {
             batchResult = { questions: parsed.questions, modelUsed: `ChatGPT (${model})` };
             const usage = resp.data.usage || {};
             recordTokenUsage(`ChatGPT (${model})`, { promptTokens: usage.prompt_tokens || 0, completionTokens: usage.completion_tokens || 0, totalTokens: usage.total_tokens || 0 });
@@ -3450,8 +3489,11 @@ async function startMockOrPyqSession(chatId, patternKey, count = null, title = n
         pattern.marking,
         secIdx
       );
-    } else {
-      // ⚡ EXPRESS / PYQ — Use standard generator (faster, lighter)
+    }
+
+    if (!result || !result.questions || result.questions.length === 0) {
+      // ⚡ FALLBACK: If specialized generator failed, try standard generator
+      console.warn(`[MockGen] Specialized generator failed for ${sec.name}. Falling back to standard question generator...`);
       result = await generateQuestions(sec.name, pattern.examKey, sec.subject, sec.questions, null, null, chatId);
     }
 
