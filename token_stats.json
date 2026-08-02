@@ -1,0 +1,32 @@
+{
+  "totalPromptTokens": 2195,
+  "totalCompletionTokens": 3082,
+  "totalTokens": 10965,
+  "totalRequests": 1,
+  "lastTestTokens": {
+    "promptTokens": 2195,
+    "completionTokens": 3082,
+    "totalTokens": 10965,
+    "model": "Gemini (gemini-3.5-flash)"
+  },
+  "byModel": {
+    "gemini": {
+      "requests": 1,
+      "promptTokens": 2195,
+      "completionTokens": 3082,
+      "totalTokens": 10965
+    },
+    "groq": {
+      "requests": 0,
+      "promptTokens": 0,
+      "completionTokens": 0,
+      "totalTokens": 0
+    },
+    "openai": {
+      "requests": 0,
+      "promptTokens": 0,
+      "completionTokens": 0,
+      "totalTokens": 0
+    }
+  }
+}

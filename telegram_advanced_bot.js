@@ -1243,8 +1243,8 @@ CRITICAL REQUIREMENTS:
 /**
  * Generate questions using Gemini API (with multiple model version fallbacks)
  */
-async function generateQuestionsWithGemini(topic, exam, subject, count = 10, pastedText = null) {
-  const seed = Date.now().toString(36) + Math.random().toString(36).substring(2, 7);
+async function generateQuestionsWithGemini(topic, exam, subject, count = 10, pastedText = null, customSeed = null) {
+  const seed = customSeed || (Date.now().toString(36) + Math.random().toString(36).substring(2, 7));
   
   // Comprehensive list of available Gemini models
   const allModels = [
@@ -1317,8 +1317,8 @@ async function generateQuestionsWithGemini(topic, exam, subject, count = 10, pas
 /**
  * Generate questions using ChatGPT API (with multiple model version fallbacks)
  */
-async function generateQuestionsWithChatGPT(topic, exam, subject, count = 10, pastedText = null) {
-  const seed = Date.now().toString(36) + Math.random().toString(36).substring(2, 7);
+async function generateQuestionsWithChatGPT(topic, exam, subject, count = 10, pastedText = null, customSeed = null) {
+  const seed = customSeed || (Date.now().toString(36) + Math.random().toString(36).substring(2, 7));
   const models = [
     'gpt-4o-mini',
     'gpt-4o',
@@ -1375,10 +1375,10 @@ async function generateQuestionsWithChatGPT(topic, exam, subject, count = 10, pa
 /**
  * Generate questions with fallback logic
  */
-async function generateQuestionsWithGroq(topic, exam, subject, count = 10, pastedText = null) {
+async function generateQuestionsWithGroq(topic, exam, subject, count = 10, pastedText = null, customSeed = null) {
   const groqKey = process.env.GROQ_API_KEY;
   if (!groqKey) return null;
-  const seed = Date.now().toString(36);
+  const seed = customSeed || Date.now().toString(36);
   const models = ['llama-3.3-70b-versatile', 'llama-3.1-70b-versatile', 'mixtral-8x7b-32768'];
   for (const model of models) {
     try {
@@ -1412,11 +1412,16 @@ async function generateQuestionsWithGroq(topic, exam, subject, count = 10, paste
   return null;
 }
 
-async function generateQuestions(topic, exam, subject, count = 10, pastedText = null) {
-  console.log('Attempting to generate questions using Gemini AI...');
-  let geminiResult = await generateQuestionsWithGemini(topic, exam, subject, count, pastedText);
+/**
+ * Generate a single set/batch of questions (up to count, default 5) using AI model fallbacks
+ */
+async function generateSingleSetQuestions(topic, exam, subject, count = 5, pastedText = null, batchIndex = 0) {
+  const seed = Date.now().toString(36) + `_b${batchIndex}_` + Math.random().toString(36).substring(2, 7);
+
+  console.log(`[Set ${batchIndex + 1}] Attempting Gemini AI for ${count} question(s)...`);
+  let geminiResult = await generateQuestionsWithGemini(topic, exam, subject, count, pastedText, seed);
   if (geminiResult && geminiResult.questions && geminiResult.questions.length > 0) {
-    console.log('✅ Successfully generated questions with Gemini.');
+    console.log(`[Set ${batchIndex + 1}] ✅ Gemini successful.`);
     return {
       questions: geminiResult.questions,
       modelUsed: `Gemini (${LAST_WORKING_GEMINI_MODEL || 'auto'})`,
@@ -1424,22 +1429,98 @@ async function generateQuestions(topic, exam, subject, count = 10, pastedText = 
     };
   }
 
-  console.log('⚠️ Gemini failed. Falling back to Groq (Llama)...');
-  const groqResult = await generateQuestionsWithGroq(topic, exam, subject, count, pastedText);
-  if (groqResult) {
-    console.log('✅ Successfully generated questions with Groq.');
+  console.log(`[Set ${batchIndex + 1}] ⚠️ Gemini failed. Falling back to Groq...`);
+  const groqResult = await generateQuestionsWithGroq(topic, exam, subject, count, pastedText, seed);
+  if (groqResult && groqResult.questions && groqResult.questions.length > 0) {
+    console.log(`[Set ${batchIndex + 1}] ✅ Groq successful.`);
     return groqResult;
   }
 
-  console.log('⚠️ Groq failed. Falling back to ChatGPT...');
-  const chatGptResult = await generateQuestionsWithChatGPT(topic, exam, subject, count, pastedText);
-  if (chatGptResult) {
-    console.log('✅ Successfully generated questions with ChatGPT.');
+  console.log(`[Set ${batchIndex + 1}] ⚠️ Groq failed. Falling back to ChatGPT...`);
+  const chatGptResult = await generateQuestionsWithChatGPT(topic, exam, subject, count, pastedText, seed);
+  if (chatGptResult && chatGptResult.questions && chatGptResult.questions.length > 0) {
+    console.log(`[Set ${batchIndex + 1}] ✅ ChatGPT successful.`);
     return chatGptResult;
   }
 
-  console.log('❌ All AI models failed to generate questions.');
+  console.log(`[Set ${batchIndex + 1}] ❌ All AI models failed for this set.`);
   return null;
+}
+
+/**
+ * Set-by-set batch generation to prevent AI timeouts/truncation when users request large question counts.
+ * Breaks total requested count into 5-question sets and combines them seamlessly.
+ */
+async function generateQuestions(topic, exam, subject, count = 10, pastedText = null, onProgress = null, chatId = null) {
+  const BATCH_SIZE = 5;
+  const totalBatches = Math.ceil(count / BATCH_SIZE);
+
+  let allQuestions = [];
+  let combinedTokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+  let modelsUsedSet = new Set();
+  let remaining = count;
+
+  console.log(`🚀 Starting set-by-set generation for total ${count} question(s) in ${totalBatches} set(s)...`);
+
+  for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+    // Check for user cancellation before starting batch
+    if (chatId && topicInput.get(chatId)?.cancelled) {
+      console.log(`🛑 Generation cancelled by user ${chatId} before set ${batchIndex + 1}`);
+      return null;
+    }
+
+    const currentBatchCount = Math.min(BATCH_SIZE, remaining);
+
+    if (onProgress) {
+      onProgress(allQuestions.length, count, batchIndex + 1, totalBatches);
+    }
+
+    const batchResult = await generateSingleSetQuestions(topic, exam, subject, currentBatchCount, pastedText, batchIndex);
+
+    // Check cancellation again right after API call completes
+    if (chatId && topicInput.get(chatId)?.cancelled) {
+      console.log(`🛑 Generation cancelled by user ${chatId} during set ${batchIndex + 1}`);
+      return null;
+    }
+
+    if (batchResult && batchResult.questions && batchResult.questions.length > 0) {
+      allQuestions.push(...batchResult.questions);
+      remaining -= batchResult.questions.length;
+
+      if (batchResult.modelUsed) {
+        modelsUsedSet.add(batchResult.modelUsed);
+      }
+      if (batchResult.tokenUsage) {
+        combinedTokenUsage.promptTokens += (batchResult.tokenUsage.promptTokens || 0);
+        combinedTokenUsage.completionTokens += (batchResult.tokenUsage.completionTokens || 0);
+        combinedTokenUsage.totalTokens += (batchResult.tokenUsage.totalTokens || 0);
+      }
+
+      if (onProgress) {
+        onProgress(allQuestions.length, count, batchIndex + 1, totalBatches);
+      }
+    } else {
+      console.warn(`⚠️ Set ${batchIndex + 1}/${totalBatches} returned no questions.`);
+      if (allQuestions.length === 0) {
+        return null;
+      }
+      // Return what we generated so far if at least one set succeeded
+      break;
+    }
+  }
+
+  if (allQuestions.length === 0) {
+    console.log('❌ All AI models failed across all sets.');
+    return null;
+  }
+
+  const modelUsed = Array.from(modelsUsedSet).join(', ') || 'AI Assistant';
+
+  return {
+    questions: allQuestions.slice(0, count),
+    modelUsed,
+    tokenUsage: combinedTokenUsage
+  };
 }
 
 /**
@@ -1467,24 +1548,26 @@ async function generateQuestionsWithAnimation(chatId, topic, exam, subject, coun
   }
 
   let progressPercent = 0;
+  let statusDetail = 'Manifesting your test path...';
+  const totalBatches = Math.ceil(count / 5);
 
-  const statusMsg = await bot.sendMessage(chatId, `✨ <b>ExamVault Luminance</b>\n━━━━━━━━━━━━━━━━━━━━\n🌟 <b>Manifesting your test path...</b>\n\n${getGlowProgressBar(0)}\n\n<i>Topic: ${topic}</i>`, {
-    parse_mode: 'HTML',
-    reply_markup: getCancelKeyboard()
-  });
-
-  // Start "Animation" interval
-  const animInterval = setInterval(async () => {
-    if (topicInput.get(chatId)?.cancelled) {
-      clearInterval(animInterval);
-      return;
+  const statusMsg = await bot.sendMessage(
+    chatId,
+    `✨ <b>ExamVault Luminance</b>\n━━━━━━━━━━━━━━━━━━━━\n🌟 <b>${statusDetail}</b>\n\n${getGlowProgressBar(0)}\n\n<i>Topic: ${topic} | Target: ${count} Questions (${totalBatches} Set${totalBatches > 1 ? 's' : ''})</i>`,
+    {
+      parse_mode: 'HTML',
+      reply_markup: getCancelKeyboard()
     }
+  );
 
-    if (progressPercent < 90) progressPercent += 10;
-
+  const updateUI = async (completedQs, totalQs, bNum, bTotal) => {
+    if (topicInput.get(chatId)?.cancelled) return;
+    const percent = Math.min(99, Math.round((completedQs / totalQs) * 100));
+    progressPercent = percent;
+    statusDetail = `Generating Set ${bNum}/${bTotal} (${completedQs}/${totalQs} questions)...`;
     try {
       await bot.editMessageText(
-        `✨ <b>ExamVault Luminance</b>\n━━━━━━━━━━━━━━━━━━━━\n🌟 <b>Energizing deep concepts...</b>\n\n${getGlowProgressBar(progressPercent)}\n\n<i>Topic: ${topic}</i>`,
+        `✨ <b>ExamVault Luminance</b>\n━━━━━━━━━━━━━━━━━━━━\n🌟 <b>${statusDetail}</b>\n\n${getGlowProgressBar(percent)}\n\n<i>Topic: ${topic} | Target: ${totalQs} Questions</i>`,
         {
           chat_id: chatId,
           message_id: statusMsg.message_id,
@@ -1492,10 +1575,44 @@ async function generateQuestionsWithAnimation(chatId, topic, exam, subject, coun
           reply_markup: getCancelKeyboard()
         }
       );
-    } catch (e) { /* Ignore minor edit errors */ }
-  }, 2000);
+    } catch (e) { }
+  };
 
-  const result = await generateQuestions(topic, exam, subject, count, pastedText);
+  // Start "Animation" interval for visual background updates
+  const animInterval = setInterval(async () => {
+    if (topicInput.get(chatId)?.cancelled) {
+      clearInterval(animInterval);
+      return;
+    }
+
+    if (progressPercent < 90) {
+      progressPercent = Math.min(90, progressPercent + 2);
+      try {
+        await bot.editMessageText(
+          `✨ <b>ExamVault Luminance</b>\n━━━━━━━━━━━━━━━━━━━━\n🌟 <b>${statusDetail}</b>\n\n${getGlowProgressBar(progressPercent)}\n\n<i>Topic: ${topic} | Target: ${count} Questions</i>`,
+          {
+            chat_id: chatId,
+            message_id: statusMsg.message_id,
+            parse_mode: 'HTML',
+            reply_markup: getCancelKeyboard()
+          }
+        );
+      } catch (e) { }
+    }
+  }, 2500);
+
+  const result = await generateQuestions(
+    topic,
+    exam,
+    subject,
+    count,
+    pastedText,
+    (completedQs, totalQs, bNum, bTotal) => {
+      updateUI(completedQs, totalQs, bNum, bTotal);
+    },
+    chatId
+  );
+
   clearInterval(animInterval);
 
   // Check if cancelled
@@ -1513,7 +1630,7 @@ async function generateQuestionsWithAnimation(chatId, topic, exam, subject, coun
 
     try {
       await bot.editMessageText(
-        `✨ <b>ExamVault Luminance</b>\n━━━━━━━━━━━━━━━━━━━━\n✅ <b>Manifestation Complete!</b>\n\n${getGlowProgressBar(100)}\n\n<i>Topic: ${topic}</i>\n\n${modelEmoji} <b>AI Model:</b> <code>${escapeHTML(modelUsed)}</code>${tokenInfo}`,
+        `✨ <b>ExamVault Luminance</b>\n━━━━━━━━━━━━━━━━━━━━\n✅ <b>Manifestation Complete! (${questions.length} Questions Generated)</b>\n\n${getGlowProgressBar(100)}\n\n<i>Topic: ${topic}</i>\n\n${modelEmoji} <b>AI Model:</b> <code>${escapeHTML(modelUsed)}</code>${tokenInfo}`,
         {
           chat_id: chatId,
           message_id: statusMsg.message_id,
