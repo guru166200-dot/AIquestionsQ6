@@ -1361,18 +1361,20 @@ async function generatePyqYearQuestions(examCatalogKey, year, section, subject, 
     if (!batchResult) {
       const groqKey = process.env.GROQ_API_KEY;
       if (groqKey) {
-        for (const model of ['llama-3.3-70b-versatile', 'llama-3.1-70b-versatile']) {
+        for (const model of ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'llama-3.1-70b-versatile']) {
           try {
             const resp = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
               model, response_format: { type: 'json_object' },
-              messages: [{ role: 'system', content: sysPrompt }, { role: 'user', content: userPrompt }]
+              messages: [{ role: 'system', content: sysPrompt }, { role: 'user', content: userPrompt }],
+              max_tokens: 4096,
+              temperature: 0.7
             }, { headers: { 'Authorization': `Bearer ${groqKey}`, 'Content-Type': 'application/json' }, timeout: 60000 });
             const parsed = safeParseJSON(resp.data.choices[0].message.content);
             if (parsed && parsed.questions && parsed.questions.length > 0) {
               batchResult = { questions: parsed.questions, modelUsed: `Groq (${model})` };
               break;
             }
-          } catch (e2) { console.warn(`[PYQ] Groq ${model} failed: ${e2.message}`); }
+          } catch (e2) { console.warn(`[PYQ] Groq ${model} failed: ${e2.response?.data?.error?.message || e2.message}`); }
         }
       }
     }
@@ -1858,13 +1860,15 @@ async function generateMockSectionQuestions(exam, section, subject, count, patte
     if (!batchResult) {
       const groqKey = process.env.GROQ_API_KEY;
       if (groqKey) {
-        const groqModels = ['llama-3.3-70b-versatile', 'llama-3.1-70b-versatile'];
+        const groqModels = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'llama-3.1-70b-versatile'];
         for (const model of groqModels) {
           try {
             const resp = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
               model,
               response_format: { type: 'json_object' },
-              messages: [{ role: 'system', content: sysPrompt }, { role: 'user', content: userPrompt }]
+              messages: [{ role: 'system', content: sysPrompt }, { role: 'user', content: userPrompt }],
+              max_tokens: 4096,
+              temperature: 0.7
             }, { headers: { 'Authorization': `Bearer ${groqKey}`, 'Content-Type': 'application/json' }, timeout: 60000 });
             const parsed = safeParseJSON(resp.data.choices[0].message.content);
             if (parsed && parsed.questions && parsed.questions.length > 0) {
@@ -1874,7 +1878,7 @@ async function generateMockSectionQuestions(exam, section, subject, count, patte
               break;
             }
           } catch (e2) {
-            console.warn(`[MockGen] Groq ${model} failed: ${e2.message}`);
+            console.warn(`[MockGen] Groq ${model} failed: ${e2.response?.data?.error?.message || e2.message}`);
           }
         }
       }
@@ -2400,7 +2404,7 @@ async function generateQuestionsWithGroq(topic, exam, subject, count = 10, paste
   const groqKey = process.env.GROQ_API_KEY;
   if (!groqKey) return null;
   const seed = customSeed || Date.now().toString(36);
-  const models = ['llama-3.3-70b-versatile', 'llama-3.1-70b-versatile', 'mixtral-8x7b-32768'];
+  const models = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'llama-3.1-70b-versatile'];
   for (const model of models) {
     try {
       console.log(`Trying Groq model: ${model}...`);
@@ -2410,7 +2414,9 @@ async function generateQuestionsWithGroq(topic, exam, subject, count = 10, paste
         messages: [
           { role: 'system', content: getSystemPrompt(exam, subject, topic, count, pastedText, seed) },
           { role: 'user', content: getUserPrompt(exam, subject, topic, count, pastedText, seed) }
-        ]
+        ],
+        max_tokens: 4096,
+        temperature: 0.7
       }, { headers: { 'Authorization': `Bearer ${groqKey}`, 'Content-Type': 'application/json' }, timeout: 60000 });
       const text = response.data.choices[0].message.content;
       const parsed = safeParseJSON(text);
