@@ -1307,7 +1307,7 @@ MANDATORY:
  * PYQ-specific question generator with year-aware prompt
  * Simulates the exact difficulty, topics, and pattern of a specific exam year
  */
-async function generatePyqYearQuestions(examCatalogKey, year, section, subject, count, batchIndex = 0) {
+async function generatePyqYearQuestions(examCatalogKey, year, section, subject, count, batchIndex = 0, onProgress = null) {
   const catalog = PYQ_EXAM_CATALOG[examCatalogKey];
   if (!catalog) return null;
 
@@ -1413,6 +1413,10 @@ async function generatePyqYearQuestions(examCatalogKey, year, section, subject, 
           if (retryBatch.modelUsed) modelUsedSet.add(retryBatch.modelUsed);
         }
       }
+    }
+
+    if (onProgress) {
+      onProgress(allQuestions.length, count, b + 1, totalBatches);
     }
   }
 
@@ -1534,28 +1538,30 @@ async function startPyqSession(chatId, examKey, year) {
   let modelUsedSet = new Set();
 
   for (let secIdx = 0; secIdx < catalog.sections.length; secIdx++) {
-    const sec = catalog.sections[secIdx];
-    const completedQs = allQuestions.length;
-    const progressPct = Math.round((completedQs / totalQs) * 100);
-
-    try {
+    const updatePyqProgress = (inSecCount, secTargetQs, bNum, bTotal) => {
+      const currentOverall = completedQs + inSecCount;
+      const pct = Math.min(99, Math.round((currentOverall / totalQs) * 100));
       bot.editMessageText(
         `📑 <b>PYQ Paper Simulator</b>\n━━━━━━━━━━━━━━━━━━━━\n` +
         `${catalog.icon} <b>${escapeHTML(examTitle)}</b>\n\n` +
-        `📌 <b>Section ${secIdx + 1}/${catalog.sections.length}:</b>\n` +
-        `    ${escapeHTML(sec.name)} — <b>${sec.questions} Qs</b>\n\n` +
-        `🔍 <b>Reconstructing ${year} official questions...</b>\n` +
-        `📊 Progress: <code>${completedQs}/${totalQs} done (${progressPct}%)</code>\n\n` +
-        `<i>Year-specific topics, difficulty, and current affairs are being matched to ${year} paper...</i>`,
+        `📌 <b>Section ${secIdx + 1}/${catalog.sections.length}:</b> ${escapeHTML(sec.name)}\n` +
+        `⚡ <b>Generating Set ${bNum}/${bTotal}</b> (${inSecCount}/${secTargetQs} Qs in section)\n\n` +
+        `${getGlowProgressBar(pct)}\n\n` +
+        `📊 <b>Overall Progress:</b> <code>${currentOverall}/${totalQs} Qs loaded (${pct}%)</code>\n` +
+        `<i>Matching ${year} exam style & current affairs...</i>`,
         { chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'HTML' }
       ).catch(() => {});
-    } catch(e) {}
+    };
 
-    let result = await generatePyqYearQuestions(examKey, year, sec.name, sec.subject, sec.questions, secIdx);
+    updatePyqProgress(0, sec.questions, 1, Math.ceil(sec.questions / 5));
+
+    let result = await generatePyqYearQuestions(examKey, year, sec.name, sec.subject, sec.questions, secIdx, updatePyqProgress);
 
     if (!result || !result.questions || result.questions.length === 0) {
       console.warn(`[PYQ] Specialized generator failed for ${sec.name}. Falling back to standard question generator...`);
-      result = await generateQuestions(sec.name, catalog.examKey, sec.subject, sec.questions, null, null, chatId);
+      result = await generateQuestions(sec.name, catalog.examKey, sec.subject, sec.questions, null, (inSecCount, secTargetQs, bNum, bTotal) => {
+        updatePyqProgress(inSecCount, secTargetQs, bNum, bTotal);
+      }, chatId);
     }
 
     if (!result || !result.questions || result.questions.length === 0) {
@@ -1801,7 +1807,7 @@ STRICT RULES:
  * Dedicated section-aware question generator for Full Mock Exam mode
  * Uses ultra-strict mock exam prompts at or above real exam standard
  */
-async function generateMockSectionQuestions(exam, section, subject, count, patternInfo, batchIndex = 0) {
+async function generateMockSectionQuestions(exam, section, subject, count, patternInfo, batchIndex = 0, onProgress = null) {
   const BATCH_SIZE = 5;
   const totalBatches = Math.ceil(count / BATCH_SIZE);
   let allQuestions = [];
@@ -1924,6 +1930,10 @@ async function generateMockSectionQuestions(exam, section, subject, count, patte
           if (retryBatch.modelUsed) modelUsedSet.add(retryBatch.modelUsed);
         }
       }
+    }
+
+    if (onProgress) {
+      onProgress(allQuestions.length, count, b + 1, totalBatches);
     }
   }
 
@@ -3488,22 +3498,22 @@ async function startMockOrPyqSession(chatId, patternKey, count = null, title = n
   let modelUsedSet = new Set();
 
   for (let secIdx = 0; secIdx < activeSections.length; secIdx++) {
-    const sec = activeSections[secIdx];
-    const completedQs = allQuestions.length;
-    const progressPct = Math.round((completedQs / totalQs) * 100);
-
-    try {
+    const updateMockProgress = (inSecCount, secTargetQs, bNum, bTotal) => {
+      const currentOverall = completedQs + inSecCount;
+      const pct = Math.min(99, Math.round((currentOverall / totalQs) * 100));
       bot.editMessageText(
         `🚀 <b>ExamVault Official Mock Exam Engine</b>\n━━━━━━━━━━━━━━━━━━━━\n` +
         `📋 <b>${escapeHTML(examTitle)}</b>\n\n` +
-        `📌 <b>Section ${secIdx + 1}/${activeSections.length}:</b>\n` +
-        `    ${escapeHTML(sec.name)} — <b>${sec.questions} Questions</b>\n\n` +
-        `⚙️ <b>${isExpress ? 'Standard' : 'Ultra-Strict Mock'} AI Generating...</b>\n` +
-        `📊 Overall Progress: <code>${completedQs}/${totalQs} Qs done (${progressPct}%)</code>\n\n` +
-        `<i>🔴 Full mock uses real-exam-level difficulty prompts — each question is independently validated...</i>`,
+        `📌 <b>Section ${secIdx + 1}/${activeSections.length}:</b> ${escapeHTML(sec.name)}\n` +
+        `⚡ <b>Generating Set ${bNum}/${bTotal}</b> (${inSecCount}/${secTargetQs} Qs in section)\n\n` +
+        `${getGlowProgressBar(pct)}\n\n` +
+        `📊 <b>Overall Progress:</b> <code>${currentOverall}/${totalQs} Qs loaded (${pct}%)</code>\n` +
+        `<i>🔴 Full mock uses real-exam-level difficulty prompts...</i>`,
         { chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'HTML' }
       ).catch(() => {});
-    } catch(e) {}
+    };
+
+    updateMockProgress(0, sec.questions, 1, Math.ceil(sec.questions / 5));
 
     let result = null;
 
@@ -3515,14 +3525,17 @@ async function startMockOrPyqSession(chatId, patternKey, count = null, title = n
         sec.subject,
         sec.questions,
         pattern.marking,
-        secIdx
+        secIdx,
+        updateMockProgress
       );
     }
 
     if (!result || !result.questions || result.questions.length === 0) {
       // ⚡ FALLBACK: If specialized generator failed, try standard generator
       console.warn(`[MockGen] Specialized generator failed for ${sec.name}. Falling back to standard question generator...`);
-      result = await generateQuestions(sec.name, pattern.examKey, sec.subject, sec.questions, null, null, chatId);
+      result = await generateQuestions(sec.name, pattern.examKey, sec.subject, sec.questions, null, (inSecCount, secTargetQs, bNum, bTotal) => {
+        updateMockProgress(inSecCount, secTargetQs, bNum, bTotal);
+      }, chatId);
     }
 
     if (!result || !result.questions || result.questions.length === 0) {
