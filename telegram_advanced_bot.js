@@ -213,13 +213,19 @@ async function getLiveTokenStatus(forceRefresh = false) {
   return status;
 }
 
-// Token usage stats persistence
+// Token usage stats persistence — with per-model breakdown
 let globalTokenStats = {
   totalPromptTokens: 0,
   totalCompletionTokens: 0,
   totalTokens: 0,
   totalRequests: 0,
-  lastTestTokens: { promptTokens: 0, completionTokens: 0, totalTokens: 0, model: 'None' }
+  lastTestTokens: { promptTokens: 0, completionTokens: 0, totalTokens: 0, model: 'None' },
+  // Per-model cumulative stats
+  byModel: {
+    gemini:  { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+    groq:    { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+    openai:  { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0 }
+  }
 };
 
 function saveTokenStats() {
@@ -234,7 +240,17 @@ function loadTokenStats() {
   try {
     if (fs.existsSync('token_stats.json')) {
       const data = fs.readFileSync('token_stats.json', 'utf8');
-      globalTokenStats = JSON.parse(data);
+      const loaded = JSON.parse(data);
+      // Merge, ensuring byModel always exists for new fields
+      globalTokenStats = {
+        ...globalTokenStats,
+        ...loaded,
+        byModel: {
+          gemini:  { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0, ...(loaded.byModel?.gemini || {}) },
+          groq:    { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0, ...(loaded.byModel?.groq   || {}) },
+          openai:  { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0, ...(loaded.byModel?.openai  || {}) }
+        }
+      };
       console.log(`🔤 Loaded token stats: ${globalTokenStats.totalTokens} total tokens used.`);
     }
   } catch (err) {
@@ -253,7 +269,70 @@ function recordTokenUsage(model, usage) {
   globalTokenStats.totalRequests += 1;
   globalTokenStats.lastTestTokens = { promptTokens: p, completionTokens: c, totalTokens: t, model };
 
+  // Accumulate per-model
+  const mLow = model.toLowerCase();
+  let bucket;
+  if (mLow.includes('gemini'))      bucket = 'gemini';
+  else if (mLow.includes('groq'))   bucket = 'groq';
+  else if (mLow.includes('chatgpt') || mLow.includes('openai') || mLow.includes('gpt')) bucket = 'openai';
+  if (bucket) {
+    globalTokenStats.byModel[bucket].requests      += 1;
+    globalTokenStats.byModel[bucket].promptTokens  += p;
+    globalTokenStats.byModel[bucket].completionTokens += c;
+    globalTokenStats.byModel[bucket].totalTokens   += t;
+  }
+
   saveTokenStats();
+}
+
+function formatLiveTokenCountMessage() {
+  const g  = globalTokenStats;
+  const bm = g.byModel;
+  const last = g.lastTestTokens;
+
+  // Bar helpers
+  const bar = (val, max, len = 10) => {
+    const filled = max > 0 ? Math.round((val / max) * len) : 0;
+    return '█'.repeat(filled) + '░'.repeat(len - filled);
+  };
+  const pct = (val, total) => total > 0 ? ((val / total) * 100).toFixed(1) + '%' : '0%';
+
+  const maxT = Math.max(bm.gemini.totalTokens, bm.groq.totalTokens, bm.openai.totalTokens, 1);
+
+  const lastLine = last && last.totalTokens > 0
+    ? `📌 <b>Last Generation</b>\n` +
+      `   • Model: <code>${escapeHTML(last.model)}</code>\n` +
+      `   • Prompt:     <code>${last.promptTokens.toLocaleString()} tokens</code>\n` +
+      `   • Completion: <code>${last.completionTokens.toLocaleString()} tokens</code>\n` +
+      `   • <b>Total: <code>${last.totalTokens.toLocaleString()} tokens</code></b>\n`
+    : `📌 <b>Last Generation:</b> <i>None yet</i>\n`;
+
+  const now = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+
+  return (
+    `🔢 <b>LIVE TOKEN COUNT DASHBOARD</b>\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+    lastLine +
+    `\n` +
+    `<b>📊 Cumulative Token Usage</b>\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `🔵 <b>Gemini AI</b>  (${bm.gemini.requests} calls)\n` +
+    `   <code>${bar(bm.gemini.totalTokens, maxT)} ${bm.gemini.totalTokens.toLocaleString()} tokens (${pct(bm.gemini.totalTokens, g.totalTokens)})</code>\n` +
+    `   ↳ Prompt: <code>${bm.gemini.promptTokens.toLocaleString()}</code>  Completion: <code>${bm.gemini.completionTokens.toLocaleString()}</code>\n\n` +
+    `🟣 <b>Groq (Llama)</b>  (${bm.groq.requests} calls)\n` +
+    `   <code>${bar(bm.groq.totalTokens, maxT)} ${bm.groq.totalTokens.toLocaleString()} tokens (${pct(bm.groq.totalTokens, g.totalTokens)})</code>\n` +
+    `   ↳ Prompt: <code>${bm.groq.promptTokens.toLocaleString()}</code>  Completion: <code>${bm.groq.completionTokens.toLocaleString()}</code>\n\n` +
+    `🟢 <b>OpenAI (GPT)</b>  (${bm.openai.requests} calls)\n` +
+    `   <code>${bar(bm.openai.totalTokens, maxT)} ${bm.openai.totalTokens.toLocaleString()} tokens (${pct(bm.openai.totalTokens, g.totalTokens)})</code>\n` +
+    `   ↳ Prompt: <code>${bm.openai.promptTokens.toLocaleString()}</code>  Completion: <code>${bm.openai.completionTokens.toLocaleString()}</code>\n\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `📦 <b>Grand Total</b>\n` +
+    `   🔤 Tokens Used:    <code>${g.totalTokens.toLocaleString()}</code>\n` +
+    `   📝 Prompt Tokens:  <code>${g.totalPromptTokens.toLocaleString()}</code>\n` +
+    `   💬 Output Tokens:  <code>${g.totalCompletionTokens.toLocaleString()}</code>\n` +
+    `   ⚡ Total AI Calls: <code>${g.totalRequests}</code>\n\n` +
+    `🕒 <i>Updated: ${now}</i>`
+  );
 }
 
 function formatPinnedTokenDashboardText(status) {
@@ -1566,6 +1645,7 @@ function getMainKeyboard(chatId) {
       { text: '🔖 My Bookmarks', callback_data: 'view_bookmarks' }
     ],
     [
+      { text: '🔢 Live Token Count', callback_data: 'live_token_count' },
       { text: '📋 Paster', callback_data: 'paster' }
     ]
   ];
@@ -1894,6 +1974,21 @@ bot.onText(/\/schedule/, (msg) => {
       ]
     }
   });
+});
+
+bot.onText(/\/tokens/, async (msg) => {
+  const chatId = msg.chat.id;
+  const text = formatLiveTokenCountMessage();
+  const keyboard = {
+    inline_keyboard: [
+      [
+        { text: '🔄 Refresh Count', callback_data: 'refresh_live_tokens' },
+        { text: '🔍 Check Connections', callback_data: 'test_connections' }
+      ],
+      [{ text: '🔙 Main Menu', callback_data: 'main_menu' }]
+    ]
+  };
+  bot.sendMessage(chatId, text, { parse_mode: 'HTML', reply_markup: keyboard });
 });
 
 // Global input listener
@@ -2454,6 +2549,32 @@ Keep it strictly under 250 words, encouraging and clear!`;
         reply_markup: getSettingsKeyboard()
       });
       bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    if (data === 'live_token_count' || data === 'refresh_live_tokens') {
+      const text = formatLiveTokenCountMessage();
+      const keyboard = {
+        inline_keyboard: [
+          [
+            { text: '🔄 Refresh Count', callback_data: 'refresh_live_tokens' },
+            { text: '🔍 Check Connections', callback_data: 'test_connections' }
+          ],
+          [{ text: '🔙 Main Menu', callback_data: 'main_menu' }]
+        ]
+      };
+      
+      if (query.message) {
+        bot.editMessageText(text, {
+          chat_id: chatId,
+          message_id: query.message.message_id,
+          parse_mode: 'HTML',
+          reply_markup: keyboard
+        }).catch(() => {});
+      } else {
+        bot.sendMessage(chatId, text, { parse_mode: 'HTML', reply_markup: keyboard });
+      }
+      bot.answerCallbackQuery(query.id, { text: 'Live Token Count Refreshed!' });
       return;
     }
 
