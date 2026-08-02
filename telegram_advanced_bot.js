@@ -973,6 +973,304 @@ function isBankSetBasedHelper(exam, topic) {
   );
 }
 
+// ==================== FULL MOCK EXAM — ULTRA-STRICT PROMPT ENGINE ====================
+// Used exclusively by Full Mock Test mode to generate questions at or above real exam standard
+
+function getMockExamSystemPrompt(exam, section, subject, count, patternInfo, batchIndex = 0) {
+  const seed = Date.now().toString(36) + `_mock_b${batchIndex}_` + Math.random().toString(36).substring(2, 7);
+
+  const examFullNames = {
+    'SSC':  'Staff Selection Commission (SSC CGL, CHSL, MTS, GD)',
+    'RRB':  'Railway Recruitment Board (RRB NTPC, Group D, ALP)',
+    'TNPSC':'Tamil Nadu Public Service Commission (TNPSC Group 1, 2, 4)',
+    'Bank': 'IBPS PO, IBPS Clerk, SBI PO, SBI Clerk',
+    'JE':   'RRB JE / SSC JE / GATE ME / UPSC ESE (Junior Engineer)'
+  };
+
+  const markingNote = patternInfo.negative > 0
+    ? `+${patternInfo.positive} for correct | -${patternInfo.negative.toFixed(2)} negative marking for wrong`
+    : `+${patternInfo.positive} for correct | NO negative marking`;
+
+  // Section-specific deep instructions
+  const sectionPrompts = {
+    'Reasoning': `
+SECTION RULES — General Intelligence & Reasoning:
+• Cover ALL reasoning types used in real exams: Series, Analogies, Classification, Coding-Decoding, Blood Relations, Direction Sense, Sitting Arrangements (linear/circular), Puzzles, Syllogism, Inequalities, Input-Output (if Bank), Statement-Conclusion, Venn Diagrams, Number/Alphabet series, Mirror/Water Images, Paper Folding, Matrix Patterns, Odd One Out.
+• NEVER repeat the same reasoning sub-type consecutively.
+• For Puzzles / Arrangements: Create a complete mini-scenario (3-5 clues) forming 1 question. The scenario must be self-consistent and logically unique.
+• For Syllogism: Use exactly 2 premises. Follow the standard I/E/A/O proposition rules.
+• Difficulty distribution: 30% Easy (Series, Analogy), 50% Moderate (Arrangements, Coding), 20% Hard (Multi-step puzzles, Syllogism with 4 conclusions).`,
+
+    'General Knowledge': `
+SECTION RULES — General Awareness / General Knowledge:
+• Cover ALL GK pillars: Indian History (Ancient/Medieval/Modern), Indian Polity & Constitution, Geography (India + World), Indian Economy, Science & Technology, Current Affairs (2024-2025), Awards & Honours, Sports, Books & Authors, National/International Organizations, Environment & Ecology.
+• FOR SSC: 40% from NCERT 6-12 core facts. 30% from actual SSC PYQs 2010-2025. 30% Expected 2025-26.
+• FOR RRB: 35% Railway-specific GK (zones, history, ministers, records). 35% Science basics. 30% Current Affairs.
+• FOR TNPSC: 50% Tamil Nadu specific (Sangam Literature, Thirukkural, TN history, TN geography, Tamil leaders: Periyar, Kamarajar, MGR, Ambedkar in TN context). 30% National GK. 20% Current Affairs.
+• Question types (MUST cover all): Direct Facts, Year-based, Statement-correct/incorrect (3 statements), Assertion-Reason, Match the Following, Chronological Order.
+• All distractors must be HIGHLY PLAUSIBLE — names or years close to the correct answer. NEVER use obviously wrong options.`,
+
+    'Quants': `
+SECTION RULES — Quantitative Aptitude / Mathematics:
+• FOR SSC/RRB/TNPSC: Cover: Number System, Simplification, Percentage, Profit & Loss, Simple & Compound Interest, Ratio & Proportion, Time & Work, Time Speed Distance, Pipes & Cisterns, Ages, Average, Mixture & Alligation, Mensuration (2D & 3D), Trigonometry, Geometry (triangles, circles), Algebra, HCF/LCM, Data Interpretation.
+• FOR BANK: Arithmetic word problems, DI (Table, Bar, Pie, Line graph), Quadratic Equations, Number Series (missing/wrong term), Caselet DI, Quantity-based comparison.
+• DIFFICULTY: 30% Easy (1-step calc), 50% Moderate (2-3 step), 20% Hard (3+ step or DI interpretation).
+• ALL numerical options must be realistically close (within 5-20% of correct answer). NEVER put options like 10, 100, 1000, 10000 together.
+• For word problems: clearly state all given values, units, and what is asked. Explanation must show step-by-step solution.`,
+
+    'English': `
+SECTION RULES — English Language / English Comprehension:
+• Cover ALL sub-types: Reading Comprehension (1 passage, 3-5 Qs), Sentence Rearrangement/Parajumbles, Fill in the Blanks (single + double blanks), Spotting Errors (grammar-based), Sentence Improvement, Cloze Test, Synonyms, Antonyms, Idioms & Phrases, One Word Substitution, Active/Passive Voice, Direct/Indirect Speech.
+• FOR SSC: Focus on grammar rules, vocabulary, idioms, comprehension passages on general topics.
+• FOR BANK: Focus on high-level vocabulary, cloze tests, reading comprehension with inference questions.
+• Vocabulary questions must use MODERATELY advanced words — not too common, not obscure jargon.
+• ALL grammar-based questions must test specific rules (subject-verb agreement, tense, prepositions, articles).`,
+
+    'General Science': `
+SECTION RULES — General Science (Physics, Chemistry, Biology):
+• Cover ALL three branches equally: ~34% Physics, ~33% Chemistry, ~33% Biology.
+• PHYSICS: Laws of motion, optics, electricity, magnetism, thermodynamics, sound, waves, nuclear physics, units & measurements, work/energy/power.
+• CHEMISTRY: Periodic table, acids/bases/salts, chemical reactions, carbon compounds, metals & non-metals, environmental chemistry, polymers, everyday chemistry.
+• BIOLOGY: Cell biology, nutrition, respiration, transport in plants/animals, reproduction, genetics, evolution, diseases & health, ecology, human body systems.
+• Include formulae-based questions for Physics. Include chemical equations for Chemistry. Include labelled diagram questions (describe what is shown) for Biology.
+• Difficulty: 25% Easy (direct definition), 50% Moderate (application-based), 25% Hard (numerical/multi-concept).`,
+
+    'Mechanical': `
+SECTION RULES — Technical Abilities (Mechanical Engineering Core):
+• Cover ALL mechanical engineering domains in depth: Fluid Mechanics (Bernoulli, pipe flow, pumps), Thermodynamics (laws, cycles: Carnot/Rankine/Otto/Diesel, enthalpy/entropy), Heat Transfer (conduction/convection/radiation, LMTD, NTU), Engineering Mechanics (statics/dynamics, friction, kinematics), Strength of Materials (stress-strain, bending, shear force diagrams, Mohr's circle), Theory of Machines (cams, gears, flywheel, governors, vibrations), Machine Design (fatigue, theories of failure, keys, bolts, bearings, shafts), Production Engineering (casting, forging, welding, machining, tolerances, fits), Industrial Engineering (CPM/PERT, inventory, queuing, forecasting), Materials Science (crystal structure, iron-carbon diagram, heat treatment).
+• MANDATORY: At least 40% numerical problems requiring formula application and unit conversion.
+• MANDATORY: All numerical options differ by 5-15% with correct SI units.
+• Tag difficulty: 20% Easy (definitions), 50% Moderate (formula application), 30% Hard (multi-step numericals / concept integration).
+• PYQ source: RRB JE 2019-2024, SSC JE 2019-2024, GATE ME 2019-2024.`,
+
+    'Computer Awareness': `
+SECTION RULES — Basics of Computer Applications:
+• Cover: Fundamentals of computers, Input/Output devices, Memory (RAM, ROM, Cache), Operating Systems (basics), MS Office (Word, Excel, PowerPoint shortcuts & features), Networking basics (IP, LAN, WAN, protocols), Database (basic SQL, DBMS concepts), Internet basics (browsers, email, HTML basics), Computer security (viruses, firewalls, encryption), Number systems (Binary/Octal/Hex conversions).
+• Mix application-based questions (e.g., "Which shortcut key does X?") with conceptual questions (e.g., "What is the function of Y?").`,
+
+    'Enivornment': `
+SECTION RULES — Basics of Environment & Pollution Control:
+• Cover: Environmental pollution (air, water, soil, noise), Greenhouse effect & Global warming, Ozone depletion, Acid rain, Biodiversity & conservation, Environmental Acts & policies (Environment Protection Act, Wildlife Protection Act, Forest Conservation Act), National parks & Biosphere reserves in India, Solid waste management, Renewable energy sources, Environmental Impact Assessment (EIA).
+• Include questions based on recent environmental events, reports (State of Forest Report, etc.), and government schemes.`
+  };
+
+  // Detect subject and pick appropriate rules
+  let sectionRule = '';
+  const subjectLower = (subject || '').toLowerCase();
+  if (subjectLower.includes('reason')) sectionRule = sectionPrompts['Reasoning'];
+  else if (subjectLower.includes('quant') || subjectLower.includes('math')) sectionRule = sectionPrompts['Quants'];
+  else if (subjectLower.includes('english')) sectionRule = sectionPrompts['English'];
+  else if (subjectLower.includes('general science') || subjectLower.includes('science')) sectionRule = sectionPrompts['General Science'];
+  else if (subjectLower.includes('general knowledge') || subjectLower.includes('general awareness') || subjectLower.includes('gk') || subjectLower.includes('awareness')) sectionRule = sectionPrompts['General Knowledge'];
+  else if (subjectLower.includes('mechanic') || subjectLower.includes('technical') || subjectLower.includes('fluid') || subjectLower.includes('thermo')) sectionRule = sectionPrompts['Mechanical'];
+  else if (subjectLower.includes('computer')) sectionRule = sectionPrompts['Computer Awareness'];
+  else if (subjectLower.includes('environ')) sectionRule = sectionPrompts['Enivornment'];
+  else sectionRule = sectionPrompts['General Knowledge'];
+
+  const systemPrompt = `You are an OFFICIAL EXAM PAPER SETTER with 30+ years of exclusive experience creating question papers for ${examFullNames[exam] || exam} examinations in India.
+
+Your MANDATE: Generate EXACTLY ${count} MCQs for the OFFICIAL FULL MOCK EXAM of "${exam}" — specifically for the section: "${section}".
+These questions MUST BE AT OR ABOVE the standard of actual government exam papers. They will be used by serious candidates preparing for real ${exam} exams.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EXAM PARAMETERS:
+• Exam: ${examFullNames[exam] || exam}
+• Section: ${section}
+• Subject/Domain: ${subject}
+• Questions to generate: ${count}
+• Marking: ${markingNote}
+• Random Seed (ensure unique set): [${seed}]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+${sectionRule}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ABSOLUTE QUALITY MANDATES (ZERO TOLERANCE):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✗ BANNED: Trivial questions like "What is the capital of India?" or "2+2=?"
+✗ BANNED: Distractors that are obviously wrong (all 4 options MUST trap unprepared candidates)
+✗ BANNED: Repeated concepts from previous batches (seed ensures uniqueness)
+✗ BANNED: Vague, ambiguous, or double-meaning question stems
+✗ BANNED: Options that differ by too wide a margin (e.g., 1, 100, 10000 together for numerical Qs)
+
+✓ REQUIRED: Every question must match official ${exam} paper language, style, and complexity
+✓ REQUIRED: 40% actual PYQs (Previous Year Questions from real papers, tagged with "source + year")
+✓ REQUIRED: 35% High-probability questions based on repeat patterns across multiple years
+✓ REQUIRED: 25% Future-oriented expected questions for 2025-2026 trend
+✓ REQUIRED: All 4 options must be highly plausible to someone who partially knows the topic
+✓ REQUIRED: Detailed explanation: WHY correct is right + WHY each wrong option is wrong
+✓ REQUIRED: Difficulty must follow this distribution: 30% Easy → 50% Moderate → 20% Hard
+✓ REQUIRED: Every question must contribute to exam readiness — no filler, no repetition
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OUTPUT FORMAT — STRICT JSON ONLY. NO markdown. START with { immediately.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{
+  "questions": [
+    {
+      "type": "Direct|Year|Statement|Assertion-Reason|Match|Chronological|Arithmetic|Numerical|Puzzle|Comprehension",
+      "question": "Complete question text exactly as it would appear in an official ${exam} paper",
+      "optionA": "Plausible and trap-worthy option A",
+      "optionB": "Plausible and trap-worthy option B",
+      "optionC": "Plausible and trap-worthy option C",
+      "optionD": "Plausible and trap-worthy option D",
+      "correctAnswer": "A|B|C|D",
+      "explanation": "✅ Correct: [full reason why this is right]. ❌ A wrong: [why]. ❌ B wrong: [why]. ❌ C wrong: [why]. ❌ D wrong: [why].",
+      "difficulty": "Easy|Moderate|Hard",
+      "trick": "Memory tip or shortcut (empty string if none)",
+      "pyqTag": "e.g. SSC CGL 2021 PYQ | High Probability | Expected 2025-2026"
+    }
+  ]
+}`;
+  return systemPrompt;
+}
+
+function getMockExamUserPrompt(exam, section, subject, count, patternInfo, batchIndex = 0) {
+  const seed2 = Date.now().toString(36) + `_u${batchIndex}_` + Math.random().toString(36).substring(2, 7);
+
+  return `Generate EXACTLY ${count} OFFICIAL FULL MOCK EXAM questions for:
+Exam: ${exam} | Section: "${section}" | Subject: ${subject}
+Seed for uniqueness: [${seed2}]
+
+STRICT RULES:
+1. Every question MUST be at the level of an actual ${exam} official exam paper — not practice app level, not textbook level.
+2. All 4 options MUST be carefully crafted to mislead partially-prepared candidates.
+3. For numerical questions: show step-by-step working in explanation with units.
+4. For statement-type: use EXACTLY 3 statements with options like "1 only / 2 and 3 only / 1 and 3 only / All of the above".
+5. For Assertion-Reason: use EXACTLY standard 4-option format.
+6. 40% must be actual PYQs with source + year tagged. Remaining 60% = high probability + expected.
+7. NO trivial questions. NO repeated sub-types consecutively.
+8. Return EXACTLY ${count} questions — not fewer, not more.
+9. Keep this batch completely unique from other batches (seed: [${seed2}]).`;
+}
+
+/**
+ * Dedicated section-aware question generator for Full Mock Exam mode
+ * Uses ultra-strict mock exam prompts at or above real exam standard
+ */
+async function generateMockSectionQuestions(exam, section, subject, count, patternInfo, batchIndex = 0) {
+  const BATCH_SIZE = 5;
+  const totalBatches = Math.ceil(count / BATCH_SIZE);
+  let allQuestions = [];
+  let modelUsedSet = new Set();
+
+  for (let b = 0; b < totalBatches; b++) {
+    const currentCount = Math.min(BATCH_SIZE, count - allQuestions.length);
+    const sysPrompt = getMockExamSystemPrompt(exam, section, subject, currentCount, patternInfo, batchIndex * 100 + b);
+    const userPrompt = getMockExamUserPrompt(exam, section, subject, currentCount, patternInfo, batchIndex * 100 + b);
+
+    let batchResult = null;
+
+    // Try Gemini first
+    const allGeminiModels = [
+      'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-flash-latest',
+      'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'
+    ];
+    const modelsToTry = LAST_WORKING_GEMINI_MODEL
+      ? [LAST_WORKING_GEMINI_MODEL, ...allGeminiModels.filter(m => m !== LAST_WORKING_GEMINI_MODEL)]
+      : allGeminiModels;
+
+    for (const model of modelsToTry) {
+      try {
+        const response = await axios.post(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
+          {
+            systemInstruction: { parts: [{ text: sysPrompt }] },
+            contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+            generationConfig: {
+              responseMimeType: 'application/json',
+              temperature: 0.75,
+              topP: 0.95,
+              maxOutputTokens: 8192
+            }
+          },
+          { headers: { 'Content-Type': 'application/json' }, timeout: 90000 }
+        );
+        const data = response.data;
+        if (data.candidates && data.candidates[0] && data.candidates[0].content) {
+          const parsed = JSON.parse(data.candidates[0].content.parts[0].text);
+          if (parsed.questions && parsed.questions.length > 0) {
+            LAST_WORKING_GEMINI_MODEL = model;
+            batchResult = { questions: parsed.questions, modelUsed: `Gemini (${model})` };
+            const usage = data.usageMetadata || {};
+            recordTokenUsage(`Gemini (${model})`, { promptTokens: usage.promptTokenCount || 0, completionTokens: usage.candidatesTokenCount || 0, totalTokens: usage.totalTokenCount || 0 });
+            break;
+          }
+        }
+      } catch (e) {
+        console.warn(`[MockGen] Gemini ${model} failed: ${e.response?.data?.error?.message || e.message}`);
+        if (model === LAST_WORKING_GEMINI_MODEL) LAST_WORKING_GEMINI_MODEL = null;
+      }
+    }
+
+    // Fallback: Groq
+    if (!batchResult) {
+      const groqKey = process.env.GROQ_API_KEY;
+      if (groqKey) {
+        const groqModels = ['llama-3.3-70b-versatile', 'llama-3.1-70b-versatile'];
+        for (const model of groqModels) {
+          try {
+            const resp = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
+              model,
+              response_format: { type: 'json_object' },
+              messages: [{ role: 'system', content: sysPrompt }, { role: 'user', content: userPrompt }]
+            }, { headers: { 'Authorization': `Bearer ${groqKey}`, 'Content-Type': 'application/json' }, timeout: 60000 });
+            const parsed = JSON.parse(resp.data.choices[0].message.content);
+            if (parsed.questions && parsed.questions.length > 0) {
+              batchResult = { questions: parsed.questions, modelUsed: `Groq (${model})` };
+              const usage = resp.data.usage || {};
+              recordTokenUsage(`Groq (${model})`, { promptTokens: usage.prompt_tokens || 0, completionTokens: usage.completion_tokens || 0, totalTokens: usage.total_tokens || 0 });
+              break;
+            }
+          } catch (e2) {
+            console.warn(`[MockGen] Groq ${model} failed: ${e2.message}`);
+          }
+        }
+      }
+    }
+
+    // Fallback: ChatGPT
+    if (!batchResult && OPENAI_API_KEY) {
+      const gptModels = ['gpt-4o-mini', 'gpt-4o', 'gpt-3.5-turbo'];
+      for (const model of gptModels) {
+        try {
+          const resp = await axios.post('https://api.openai.com/v1/chat/completions', {
+            model,
+            response_format: { type: 'json_object' },
+            messages: [{ role: 'system', content: sysPrompt }, { role: 'user', content: userPrompt }]
+          }, { headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_API_KEY}` }, timeout: 60000 });
+          const parsed = JSON.parse(resp.data.choices[0].message.content);
+          if (parsed.questions && parsed.questions.length > 0) {
+            batchResult = { questions: parsed.questions, modelUsed: `ChatGPT (${model})` };
+            const usage = resp.data.usage || {};
+            recordTokenUsage(`ChatGPT (${model})`, { promptTokens: usage.prompt_tokens || 0, completionTokens: usage.completion_tokens || 0, totalTokens: usage.total_tokens || 0 });
+            break;
+          }
+        } catch (e3) {
+          console.warn(`[MockGen] ChatGPT ${model} failed: ${e3.message}`);
+        }
+      }
+    }
+
+    if (batchResult && batchResult.questions.length > 0) {
+      allQuestions.push(...batchResult.questions);
+      modelUsedSet.add(batchResult.modelUsed);
+    } else {
+      console.warn(`[MockGen] All models failed for section "${section}" batch ${b + 1}. Skipping.`);
+      if (allQuestions.length === 0 && b === 0) return null; // Critical failure on first batch
+    }
+  }
+
+  if (allQuestions.length === 0) return null;
+
+  return {
+    questions: allQuestions.slice(0, count),
+    modelUsed: Array.from(modelUsedSet).join(', ') || 'AI Mock Engine'
+  };
+}
+
+// ==================== END FULL MOCK EXAM PROMPT ENGINE ====================
+
 function getSystemPrompt(exam, subject, topic, count, pastedText = null, seed = "") {
   const isCurrentAffairs = (subject || '').toLowerCase().includes('current affairs');
   const yearRange = isCurrentAffairs ? '2024 to 2025' : '2000 to 2025';
@@ -2286,22 +2584,199 @@ function showCountdownDashboard(chatId, messageId = null) {
 }
 
 // --- MOCK EXAM & PYQ SIMULATOR HELPERS ---
+
+const MOCK_EXAM_PATTERNS = {
+  'SSC_CGL': {
+    id: 'SSC_CGL',
+    name: '🎖️ SSC CGL (Tier 1)',
+    examKey: 'SSC',
+    totalQuestions: 100,
+    totalMarks: 200,
+    durationMinutes: 60,
+    hasSectionalTimer: true,
+    marking: { positive: 2, negative: 0.50 },
+    cutoffEstimate: 135,
+    sections: [
+      { name: 'General Intelligence & Reasoning', questions: 25, marks: 50, timerMinutes: 15, subject: 'Reasoning' },
+      { name: 'General Awareness', questions: 25, marks: 50, timerMinutes: 15, subject: 'General Knowledge' },
+      { name: 'Quantitative Aptitude', questions: 25, marks: 50, timerMinutes: 15, subject: 'Quants' },
+      { name: 'English Comprehension', questions: 25, marks: 50, timerMinutes: 15, subject: 'English' }
+    ],
+    expressScale: [
+      { name: 'General Intelligence & Reasoning', questions: 6, marks: 12, timerMinutes: 4, subject: 'Reasoning' },
+      { name: 'General Awareness', questions: 6, marks: 12, timerMinutes: 4, subject: 'General Knowledge' },
+      { name: 'Quantitative Aptitude', questions: 6, marks: 12, timerMinutes: 4, subject: 'Quants' },
+      { name: 'English Comprehension', questions: 7, marks: 14, timerMinutes: 3, subject: 'English' }
+    ]
+  },
+  'RRB_NTPC': {
+    id: 'RRB_NTPC',
+    name: '🚂 RRB NTPC (CBT 1)',
+    examKey: 'RRB',
+    totalQuestions: 100,
+    totalMarks: 100,
+    durationMinutes: 90,
+    hasSectionalTimer: false,
+    marking: { positive: 1, negative: 0.3333 },
+    cutoffEstimate: 72,
+    sections: [
+      { name: 'General Awareness', questions: 40, marks: 40, timerMinutes: null, subject: 'General Knowledge' },
+      { name: 'Mathematics', questions: 30, marks: 30, timerMinutes: null, subject: 'Quants' },
+      { name: 'General Intelligence & Reasoning', questions: 30, marks: 30, timerMinutes: null, subject: 'Reasoning' }
+    ],
+    expressScale: [
+      { name: 'General Awareness', questions: 10, marks: 10, timerMinutes: null, subject: 'General Knowledge' },
+      { name: 'Mathematics', questions: 8, marks: 8, timerMinutes: null, subject: 'Quants' },
+      { name: 'General Intelligence & Reasoning', questions: 7, marks: 7, timerMinutes: null, subject: 'Reasoning' }
+    ]
+  },
+  'TNPSC_GROUP1': {
+    id: 'TNPSC_GROUP1',
+    name: '🏛️ TNPSC Prelims (Group 1)',
+    examKey: 'TNPSC',
+    totalQuestions: 200,
+    totalMarks: 300,
+    durationMinutes: 180,
+    hasSectionalTimer: false,
+    marking: { positive: 1.5, negative: 0 },
+    cutoffEstimate: 170,
+    sections: [
+      { name: 'General Studies (Degree Standard)', questions: 175, marks: 262.5, timerMinutes: null, subject: 'General Knowledge' },
+      { name: 'Aptitude & Mental Ability (SSLC Standard)', questions: 25, marks: 37.5, timerMinutes: null, subject: 'Quants' }
+    ],
+    expressScale: [
+      { name: 'General Studies (Degree Standard)', questions: 26, marks: 39, timerMinutes: null, subject: 'General Knowledge' },
+      { name: 'Aptitude & Mental Ability (SSLC Standard)', questions: 4, marks: 6, timerMinutes: null, subject: 'Quants' }
+    ]
+  },
+  'BANK_PRELIMS': {
+    id: 'BANK_PRELIMS',
+    name: '🏦 Bank Prelims (IBPS PO / SBI PO)',
+    examKey: 'Bank',
+    totalQuestions: 100,
+    totalMarks: 100,
+    durationMinutes: 60,
+    hasSectionalTimer: true,
+    marking: { positive: 1, negative: 0.25 },
+    cutoffEstimate: 58,
+    sections: [
+      { name: 'English Language', questions: 30, marks: 30, timerMinutes: 20, subject: 'English' },
+      { name: 'Quantitative Aptitude', questions: 35, marks: 35, timerMinutes: 20, subject: 'Quants' },
+      { name: 'Reasoning Ability', questions: 35, marks: 35, timerMinutes: 20, subject: 'Reasoning' }
+    ],
+    expressScale: [
+      { name: 'English Language', questions: 8, marks: 8, timerMinutes: 5, subject: 'English' },
+      { name: 'Quantitative Aptitude', questions: 9, marks: 9, timerMinutes: 5, subject: 'Quants' },
+      { name: 'Reasoning Ability', questions: 8, marks: 8, timerMinutes: 5, subject: 'Reasoning' }
+    ]
+  },
+  'RRB_JE_CBT1': {
+    id: 'RRB_JE_CBT1',
+    name: '⚙️ JE Technical — Stage 1 (RRB JE CBT 1)',
+    examKey: 'JE',
+    totalQuestions: 100,
+    totalMarks: 100,
+    durationMinutes: 90,
+    hasSectionalTimer: false,
+    marking: { positive: 1, negative: 0.3333 },
+    cutoffEstimate: 65,
+    sections: [
+      { name: 'Mathematics', questions: 30, marks: 30, timerMinutes: null, subject: 'Quants' },
+      { name: 'General Intelligence & Reasoning', questions: 25, marks: 25, timerMinutes: null, subject: 'Reasoning' },
+      { name: 'General Science (Physics, Chemistry, Biology)', questions: 30, marks: 30, timerMinutes: null, subject: 'General Science' },
+      { name: 'General Awareness', questions: 15, marks: 15, timerMinutes: null, subject: 'General Knowledge' }
+    ],
+    expressScale: [
+      { name: 'Mathematics', questions: 8, marks: 8, timerMinutes: null, subject: 'Quants' },
+      { name: 'General Intelligence & Reasoning', questions: 6, marks: 6, timerMinutes: null, subject: 'Reasoning' },
+      { name: 'General Science (Physics, Chemistry, Biology)', questions: 8, marks: 8, timerMinutes: null, subject: 'General Science' },
+      { name: 'General Awareness', questions: 3, marks: 3, timerMinutes: null, subject: 'General Knowledge' }
+    ]
+  },
+  'RRB_JE_CBT2': {
+    id: 'RRB_JE_CBT2',
+    name: '⚙️ JE Technical — Stage 2 (RRB JE CBT 2)',
+    examKey: 'JE',
+    totalQuestions: 150,
+    totalMarks: 150,
+    durationMinutes: 120,
+    hasSectionalTimer: false,
+    marking: { positive: 1, negative: 0.3333 },
+    cutoffEstimate: 105,
+    sections: [
+      { name: 'Technical Abilities (Branch Core)', questions: 100, marks: 100, timerMinutes: null, subject: 'Mechanical' },
+      { name: 'Physics & Chemistry', questions: 15, marks: 15, timerMinutes: null, subject: 'General Science' },
+      { name: 'General Awareness', questions: 15, marks: 15, timerMinutes: null, subject: 'General Knowledge' },
+      { name: 'Basics of Computer Applications', questions: 10, marks: 10, timerMinutes: null, subject: 'Computer Awareness' },
+      { name: 'Basics of Environment & Pollution Control', questions: 10, marks: 10, timerMinutes: null, subject: 'Enivornment' }
+    ],
+    expressScale: [
+      { name: 'Technical Abilities (Branch Core)', questions: 16, marks: 16, timerMinutes: null, subject: 'Mechanical' },
+      { name: 'Physics & Chemistry', questions: 3, marks: 3, timerMinutes: null, subject: 'General Science' },
+      { name: 'General Awareness', questions: 3, marks: 3, timerMinutes: null, subject: 'General Knowledge' },
+      { name: 'Basics of Computer Applications', questions: 2, marks: 2, timerMinutes: null, subject: 'Computer Awareness' },
+      { name: 'Basics of Environment & Pollution Control', questions: 2, marks: 2, timerMinutes: null, subject: 'Enivornment' }
+    ]
+  }
+};
+
 function showMockExamMenu(chatId, messageId = null) {
-  const text = `🏆 <b>Full-Length Timed Mock Exam Mode</b>\n━━━━━━━━━━━━━━━━━━━━\n` +
-    `Simulates real official exam conditions:\n` +
-    `• ⏱️ Timed Session\n` +
-    `• 🔒 Instant answer feedback is HIDDEN\n` +
-    `• 📈 Final Scorecard & Detailed Breakdown at the end!\n\n` +
-    `Select your Exam:`;
+  let text = `🏆 <b>Full-Length Timed Mock Exam Mode</b>\n` +
+    `━━━━━━━━━━━━━━━━━━━━\n` +
+    `Latest Official Exam Patterns, Timers & Marking Schemes:\n\n` +
+    `1️⃣ <b>🎖️ SSC CGL (Tier 1)</b> — 100 Qs | 200 Marks | 60 mins (15m Sectional Timers) | +2 / -0.50\n` +
+    `2️⃣ <b>🚂 RRB NTPC (CBT 1)</b> — 100 Qs | 100 Marks | 90 mins (Composite Time) | +1 / -0.33\n` +
+    `3️⃣ <b>🏛️ TNPSC Prelims (Group 1)</b> — 200 Qs | 300 Marks | 180 mins | +1.5 / No Negative\n` +
+    `4️⃣ <b>🏦 Bank Prelims (IBPS PO / SBI PO)</b> — 100 Qs | 100 Marks | 60 mins (20m Sectional Timers) | +1 / -0.25\n` +
+    `5️⃣ <b>⚙️ JE Technical (RRB JE)</b>:\n` +
+    `    • <b>Stage 1 (CBT 1)</b>: 100 Qs | 100 Marks | 90 mins | +1 / -0.33\n` +
+    `    • <b>Stage 2 (CBT 2)</b>: 150 Qs | 150 Marks | 120 mins | +1 / -0.33\n\n` +
+    `<i>Select an exam to view section breakdown & start:</i>`;
 
   const keyboard = {
     inline_keyboard: [
-      [{ text: '🎖️ SSC CGL Mock (25 Qs)', callback_data: 'start_mock_SSC_25' }],
-      [{ text: '🚂 RRB NTPC Mock (30 Qs)', callback_data: 'start_mock_RRB_30' }],
-      [{ text: '🏛️ TNPSC Prelims Mock (30 Qs)', callback_data: 'start_mock_TNPSC_30' }],
-      [{ text: '🏦 Bank Prelims Mock (35 Qs)', callback_data: 'start_mock_Bank_35' }],
-      [{ text: '⚙️ JE Technical Mock (30 Qs)', callback_data: 'start_mock_JE_30' }],
+      [{ text: '🎖️ SSC CGL (Tier 1)', callback_data: 'start_mock_select_SSC_CGL' }],
+      [{ text: '🚂 RRB NTPC (CBT 1)', callback_data: 'start_mock_select_RRB_NTPC' }],
+      [{ text: '🏛️ TNPSC Prelims (Group 1)', callback_data: 'start_mock_select_TNPSC_GROUP1' }],
+      [{ text: '🏦 Bank Prelims (IBPS PO / SBI PO)', callback_data: 'start_mock_select_BANK_PRELIMS' }],
+      [
+        { text: '⚙️ RRB JE CBT 1', callback_data: 'start_mock_select_RRB_JE_CBT1' },
+        { text: '⚙️ RRB JE CBT 2', callback_data: 'start_mock_select_RRB_JE_CBT2' }
+      ],
       [{ text: '🔙 Main Menu', callback_data: 'main_menu' }]
+    ]
+  };
+
+  if (messageId) {
+    bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML', reply_markup: keyboard }).catch(() => {});
+  } else {
+    bot.sendMessage(chatId, text, { parse_mode: 'HTML', reply_markup: keyboard });
+  }
+}
+
+function showMockExamTypeSelection(chatId, patternKey, messageId = null) {
+  const pattern = MOCK_EXAM_PATTERNS[patternKey];
+  if (!pattern) return showMockExamMenu(chatId, messageId);
+
+  let text = `🏆 <b>${escapeHTML(pattern.name)}</b>\n━━━━━━━━━━━━━━━━━━━━\n` +
+    `📋 <b>Official Pattern Breakdown:</b>\n` +
+    `• <b>Total Questions:</b> ${pattern.totalQuestions}\n` +
+    `• <b>Total Marks:</b> ${pattern.totalMarks}\n` +
+    `• <b>Duration:</b> ${pattern.durationMinutes} Minutes ${pattern.hasSectionalTimer ? '(Strict Sectional Timers)' : '(Composite Time)'}\n` +
+    `• <b>Marking Scheme:</b> +${pattern.marking.positive} for correct | ${pattern.marking.negative > 0 ? '-' + pattern.marking.negative.toFixed(2) + ' for wrong' : 'No Negative Marking'}\n\n` +
+    `📚 <b>Section-Wise Structure:</b>\n`;
+
+  pattern.sections.forEach((sec, idx) => {
+    text += `${idx + 1}. <b>${escapeHTML(sec.name)}</b>: ${sec.questions} Qs | ${sec.marks} Marks ${sec.timerMinutes ? '(' + sec.timerMinutes + ' mins)' : ''}\n`;
+  });
+
+  text += `\n<i>Choose mode to begin:</i>`;
+
+  const keyboard = {
+    inline_keyboard: [
+      [{ text: `🚀 Full Official Mock (${pattern.totalQuestions} Qs | ${pattern.durationMinutes}m)`, callback_data: `start_mock_full_${patternKey}` }],
+      [{ text: `⚡ Express Practice Mock (~25 Qs | Proportional)`, callback_data: `start_mock_express_${patternKey}` }],
+      [{ text: '🔙 Back to Mock Menu', callback_data: 'mock_exam_menu' }]
     ]
   };
 
@@ -2318,11 +2793,11 @@ function showPyqMenu(chatId, messageId = null) {
 
   const keyboard = {
     inline_keyboard: [
-      [{ text: '🎖️ SSC CGL 2023 Official PYQ', callback_data: 'start_pyq_SSC_2023' }],
-      [{ text: '🚂 RRB NTPC 2021 Official PYQ', callback_data: 'start_pyq_RRB_2021' }],
-      [{ text: '🏛️ TNPSC Group 4 2022 PYQ', callback_data: 'start_pyq_TNPSC_2022' }],
-      [{ text: '🏦 IBPS PO 2023 Official PYQ', callback_data: 'start_pyq_Bank_2023' }],
-      [{ text: '⚙️ RRB JE 2019 Official PYQ', callback_data: 'start_pyq_JE_2019' }],
+      [{ text: '🎖️ SSC CGL 2023 Official PYQ', callback_data: 'start_pyq_SSC_CGL_2023' }],
+      [{ text: '🚂 RRB NTPC 2021 Official PYQ', callback_data: 'start_pyq_RRB_NTPC_2021' }],
+      [{ text: '🏛️ TNPSC Group 1 2022 PYQ', callback_data: 'start_pyq_TNPSC_GROUP1_2022' }],
+      [{ text: '🏦 IBPS PO 2023 Official PYQ', callback_data: 'start_pyq_BANK_PRELIMS_2023' }],
+      [{ text: '⚙️ RRB JE 2019 Official PYQ', callback_data: 'start_pyq_RRB_JE_CBT1_2019' }],
       [{ text: '🔙 Main Menu', callback_data: 'main_menu' }]
     ]
   };
@@ -2334,24 +2809,121 @@ function showPyqMenu(chatId, messageId = null) {
   }
 }
 
-async function startMockOrPyqSession(chatId, exam, count, title, isPyq = false) {
-  bot.sendMessage(chatId, `🚀 <b>Preparing ${title}...</b>\nGenerating ${count} exam-standard questions. Please wait...`, { parse_mode: 'HTML' });
+async function startMockOrPyqSession(chatId, patternKey, count = null, title = null, isPyq = false, isExpress = false) {
+  // Normalize legacy keys
+  let key = patternKey;
+  if (key === 'SSC') key = 'SSC_CGL';
+  if (key === 'RRB') key = 'RRB_NTPC';
+  if (key === 'TNPSC') key = 'TNPSC_GROUP1';
+  if (key === 'Bank' || key === 'BANK') key = 'BANK_PRELIMS';
+  if (key === 'JE') key = 'RRB_JE_CBT1';
 
-  const result = await generateQuestionsWithAnimation(chatId, title, exam, 'Full Exam', count);
-  if (!result) return;
+  const pattern = MOCK_EXAM_PATTERNS[key] || MOCK_EXAM_PATTERNS['SSC_CGL'];
+  const activeSections = isExpress ? pattern.expressScale : pattern.sections;
+  const examTitle = title || (isExpress ? `${pattern.name} — ⚡ Express Practice Mock` : `${pattern.name} — 🏆 Full Official Mock Exam`);
 
-  const { questions, modelUsed } = result;
+  const totalQs = activeSections.reduce((s, sec) => s + sec.questions, 0);
 
-  activeMockExams.set(chatId, {
-    title,
-    exam,
-    questions,
-    current: 0,
-    userAnswers: [],
-    startTime: Date.now(),
-    modelUsed,
-    isPyq
+  const statusMsg = await bot.sendMessage(chatId,
+    `🚀 <b>ExamVault Official Mock Exam Engine</b>\n━━━━━━━━━━━━━━━━━━━━\n` +
+    `📋 <b>${escapeHTML(examTitle)}</b>\n` +
+    `📊 Total: <b>${totalQs} Questions</b> across <b>${activeSections.length} Sections</b>\n` +
+    `🔬 Mode: <b>${isExpress ? '⚡ Express' : '🏆 Full Official'}</b> | Engine: <b>${isExpress ? 'Standard AI' : '🔴 Ultra-Strict Mock AI'}</b>\n\n` +
+    `⏳ <i>Generating section-wise exam-standard questions...</i>`,
+    { parse_mode: 'HTML' }
+  );
+
+  let allQuestions = [];
+  let modelUsedSet = new Set();
+
+  for (let secIdx = 0; secIdx < activeSections.length; secIdx++) {
+    const sec = activeSections[secIdx];
+    const completedQs = allQuestions.length;
+    const progressPct = Math.round((completedQs / totalQs) * 100);
+
+    try {
+      bot.editMessageText(
+        `🚀 <b>ExamVault Official Mock Exam Engine</b>\n━━━━━━━━━━━━━━━━━━━━\n` +
+        `📋 <b>${escapeHTML(examTitle)}</b>\n\n` +
+        `📌 <b>Section ${secIdx + 1}/${activeSections.length}:</b>\n` +
+        `    ${escapeHTML(sec.name)} — <b>${sec.questions} Questions</b>\n\n` +
+        `⚙️ <b>${isExpress ? 'Standard' : 'Ultra-Strict Mock'} AI Generating...</b>\n` +
+        `📊 Overall Progress: <code>${completedQs}/${totalQs} Qs done (${progressPct}%)</code>\n\n` +
+        `<i>🔴 Full mock uses real-exam-level difficulty prompts — each question is independently validated...</i>`,
+        { chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'HTML' }
+      ).catch(() => {});
+    } catch(e) {}
+
+    let result = null;
+
+    if (!isExpress && !isPyq) {
+      // ✅ FULL MOCK — Use ultra-strict dedicated mock exam prompt engine
+      result = await generateMockSectionQuestions(
+        pattern.examKey,
+        sec.name,
+        sec.subject,
+        sec.questions,
+        pattern.marking,
+        secIdx
+      );
+    } else {
+      // ⚡ EXPRESS / PYQ — Use standard generator (faster, lighter)
+      result = await generateQuestions(sec.name, pattern.examKey, sec.subject, sec.questions, null, null, chatId);
+    }
+
+    if (!result || !result.questions || result.questions.length === 0) {
+      bot.editMessageText(
+        `❌ <b>Generation Failed!</b>\n\nFailed to generate questions for section:\n<b>${escapeHTML(sec.name)}</b>\n\nPlease try again or switch to ⚡ Express mode.`,
+        { chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'HTML' }
+      ).catch(() => {});
+      bot.sendMessage(chatId, `⬅️ <b>Mock Session Cancelled.</b>`, { parse_mode: 'HTML', reply_markup: getMainKeyboard(chatId) });
+      return;
+    }
+
+    if (result.modelUsed) modelUsedSet.add(result.modelUsed);
+
+    result.questions.forEach((q) => {
+      allQuestions.push({
+        ...q,
+        sectionName: sec.name,
+        sectionIndex: secIdx,
+        positiveMarks: pattern.marking.positive,
+        negativeMarks: pattern.marking.negative,
+        subject: sec.subject
+      });
+    });
+  }
+
+  // Calculate section start indices
+  const sectionStartIndices = [];
+  let runningIdx = 0;
+  activeSections.forEach(sec => {
+    sectionStartIndices.push(runningIdx);
+    runningIdx += sec.questions;
   });
+
+  const session = {
+    patternKey: key,
+    pattern,
+    title: examTitle,
+    questions: allQuestions,
+    sections: activeSections,
+    sectionStartIndices,
+    current: 0,
+    currentSectionIndex: 0,
+    userAnswers: new Array(allQuestions.length).fill(null),
+    startTime: Date.now(),
+    sectionStartTimes: activeSections.map(() => Date.now()),
+    modelUsed,
+    isPyq,
+    isExpress
+  };
+
+  activeMockExams.set(chatId, session);
+
+  try {
+    bot.deleteMessage(chatId, statusMsg.message_id).catch(() => {});
+  } catch(e) {}
 
   renderMockQuestion(chatId);
 }
@@ -2360,22 +2932,73 @@ function renderMockQuestion(chatId, messageId = null) {
   const session = activeMockExams.get(chatId);
   if (!session) return;
 
-  const q = session.questions[session.current];
+  const pattern = session.pattern;
+  const currentQ = session.questions[session.current];
   const total = session.questions.length;
-  const elapsedSec = Math.round((Date.now() - session.startTime) / 1000);
-  const min = Math.floor(elapsedSec / 60);
-  const sec = elapsedSec % 60;
-  const timeStr = `${min}m ${sec}s`;
+  const currentSecIdx = currentQ.sectionIndex;
+  const currentSec = session.sections[currentSecIdx];
 
-  const text = `🏆 <b>${escapeHTML(session.title)}</b>\n━━━━━━━━━━━━━━━━━━━━\n` +
-    `⏱️ <b>Elapsed Time:</b> <code>${timeStr}</code>\n` +
-    `❓ <b>Question ${session.current + 1}/${total}</b>\n\n` +
-    `<b>${escapeHTML(q.question)}</b>\n\n` +
-    `<b>A)</b> ${escapeHTML(q.optionA)}\n` +
-    `<b>B)</b> ${escapeHTML(q.optionB)}\n` +
-    `<b>C)</b> ${escapeHTML(q.optionC)}\n` +
-    `<b>D)</b> ${escapeHTML(q.optionD)}\n\n` +
-    `<i>Select your choice (Answers remain hidden until test end):</i>`;
+  // Update session currentSectionIndex if changed
+  if (session.currentSectionIndex !== currentSecIdx) {
+    session.currentSectionIndex = currentSecIdx;
+    if (!session.sectionStartTimes[currentSecIdx]) {
+      session.sectionStartTimes[currentSecIdx] = Date.now();
+    }
+  }
+
+  // Calculate overall timer
+  const totalElapsedSec = Math.round((Date.now() - session.startTime) / 1000);
+  const maxTotalSec = (session.isExpress ? Math.round(pattern.durationMinutes * 0.25) : pattern.durationMinutes) * 60;
+  const overallRemainingSec = Math.max(0, maxTotalSec - totalElapsedSec);
+  const overallMin = Math.floor(overallRemainingSec / 60);
+  const overallSec = overallRemainingSec % 60;
+  const overallTimeStr = `${overallMin}m ${overallSec}s`;
+
+  // Auto-finish if overall time expired
+  if (overallRemainingSec <= 0) {
+    bot.sendMessage(chatId, `⏰ <b>Time's Up!</b> Overall exam duration has concluded. Submitting your answer sheet...`, { parse_mode: 'HTML' });
+    return finishMockExam(chatId, messageId);
+  }
+
+  // Sectional Timer handling
+  let sectionTimerStr = '';
+  if (pattern.hasSectionalTimer && currentSec.timerMinutes) {
+    const secElapsed = Math.round((Date.now() - session.sectionStartTimes[currentSecIdx]) / 1000);
+    const maxSecTime = currentSec.timerMinutes * 60;
+    const secRemaining = Math.max(0, maxSecTime - secElapsed);
+
+    if (secRemaining <= 0) {
+      // Advance to next section if available
+      if (currentSecIdx < session.sections.length - 1) {
+        session.currentSectionIndex = currentSecIdx + 1;
+        session.current = session.sectionStartIndices[currentSecIdx + 1];
+        session.sectionStartTimes[session.currentSectionIndex] = Date.now();
+        bot.sendMessage(chatId, `⏱️ <b>Sectional Time Expired!</b> Moving to Section ${session.currentSectionIndex + 1}: <b>${escapeHTML(session.sections[session.currentSectionIndex].name)}</b>`, { parse_mode: 'HTML' });
+        return renderMockQuestion(chatId, messageId);
+      } else {
+        bot.sendMessage(chatId, `⏰ <b>Final Section Timer Expired!</b> Submitting your mock exam...`, { parse_mode: 'HTML' });
+        return finishMockExam(chatId, messageId);
+      }
+    }
+
+    const secMin = Math.floor(secRemaining / 60);
+    const secS = secRemaining % 60;
+    sectionTimerStr = `⏱️ <b>Section Timer:</b> <code>${secMin}m ${secS}s</code> | `;
+  }
+
+  const secQNum = session.current - session.sectionStartIndices[currentSecIdx] + 1;
+
+  let text = `🏆 <b>${escapeHTML(session.title)}</b>\n━━━━━━━━━━━━━━━━━━━━\n` +
+    `📌 <b>Section ${currentSecIdx + 1}/${session.sections.length}: ${escapeHTML(currentSec.name)}</b>\n` +
+    `${sectionTimerStr}⌛ <b>Total Time Left:</b> <code>${overallTimeStr}</code>\n` +
+    `🏷️ <b>Marking:</b> <code>+${currentQ.positiveMarks} Marks | ${currentQ.negativeMarks > 0 ? '-' + currentQ.negativeMarks.toFixed(2) + ' Penalty' : 'No Negative'}</code>\n\n` +
+    `❓ <b>Question ${session.current + 1}/${total}</b> <i>(Section Q${secQNum}/${currentSec.questions})</i>\n\n` +
+    `<b>${escapeHTML(currentQ.question)}</b>\n\n` +
+    `<b>A)</b> ${escapeHTML(currentQ.optionA)}\n` +
+    `<b>B)</b> ${escapeHTML(currentQ.optionB)}\n` +
+    `<b>C)</b> ${escapeHTML(currentQ.optionC)}\n` +
+    `<b>D)</b> ${escapeHTML(currentQ.optionD)}\n\n` +
+    `<i>Select your choice (Instant feedback is hidden until test submission):</i>`;
 
   const keyboard = {
     inline_keyboard: [
@@ -2387,8 +3010,10 @@ function renderMockQuestion(chatId, messageId = null) {
         { text: '🟡 C', callback_data: 'mock_ans_C' },
         { text: '🔴 D', callback_data: 'mock_ans_D' }
       ],
-      [{ text: '⏭️ Skip Question', callback_data: 'mock_ans_SKIP' }]
-    ]
+      [{ text: '⏭️ Skip Question', callback_data: 'mock_ans_SKIP' }],
+      !pattern.hasSectionalTimer && session.sections.length > 1 ? [{ text: '📌 Switch Section', callback_data: 'mock_switch_sec_menu' }] : [],
+      [{ text: '🛑 Submit & Finish Exam Early', callback_data: 'mock_finish_early' }]
+    ].filter(r => r.length > 0)
   };
 
   if (messageId) {
@@ -2402,42 +3027,95 @@ function finishMockExam(chatId, messageId) {
   const session = activeMockExams.get(chatId);
   if (!session) return;
 
-  const totalSec = Math.round((Date.now() - session.startTime) / 1000);
-  const min = Math.floor(totalSec / 60);
-  const sec = totalSec % 60;
+  const pattern = session.pattern;
+  const totalElapsedSec = Math.round((Date.now() - session.startTime) / 1000);
+  const min = Math.floor(totalElapsedSec / 60);
+  const sec = totalElapsedSec % 60;
 
-  let correctCount = 0;
+  // Section wise stats calculation
+  const sectionStats = session.sections.map(() => ({
+    correct: 0, wrong: 0, skipped: 0, posMarks: 0, negMarks: 0, netMarks: 0
+  }));
+
+  let totalAttempted = 0;
+  let totalCorrect = 0;
+  let totalWrong = 0;
+  let totalSkipped = 0;
+  let totalPosMarks = 0;
+  let totalNegMarks = 0;
   let wrongAnswers = [];
 
   session.questions.forEach((q, idx) => {
     const userAns = session.userAnswers[idx];
-    if (userAns === q.correctAnswer) {
-      correctCount++;
+    const secIdx = q.sectionIndex;
+    const stats = sectionStats[secIdx];
+
+    if (!userAns) {
+      totalSkipped++;
+      stats.skipped++;
+      wrongAnswers.push({ q, userAnswer: 'Skipped' });
+    } else if (userAns === q.correctAnswer) {
+      totalCorrect++;
+      totalAttempted++;
+      stats.correct++;
+      const pos = q.positiveMarks || 1;
+      stats.posMarks += pos;
+      totalPosMarks += pos;
     } else {
-      wrongAnswers.push({ q, userAnswer: userAns || 'Skipped' });
+      totalWrong++;
+      totalAttempted++;
+      stats.wrong++;
+      const neg = q.negativeMarks || 0;
+      stats.negMarks += neg;
+      totalNegMarks += neg;
+      wrongAnswers.push({ q, userAnswer: userAns });
     }
   });
 
-  const total = session.questions.length;
-  const pct = Math.round((correctCount / total) * 100);
-  const grade = pct >= 80 ? '🏆 Master Class Pass!' : pct >= 60 ? '🎉 Good Score!' : '💪 Keep Practicing!';
+  sectionStats.forEach(s => {
+    s.netMarks = Math.max(0, s.posMarks - s.negMarks);
+  });
 
-  recordQuizStats(chatId, session.exam, 'Full Mock Exam', correctCount, total);
+  const netTotalMarks = Math.max(0, totalPosMarks - totalNegMarks);
+  const maxPossibleMarks = session.questions.reduce((acc, q) => acc + (q.positiveMarks || 1), 0);
+  const percentage = maxPossibleMarks > 0 ? Math.round((netTotalMarks / maxPossibleMarks) * 100) : 0;
+  const overallAccuracy = totalAttempted > 0 ? Math.round((totalCorrect / totalAttempted) * 100) : 0;
 
-  let text = `🏁 <b>${escapeHTML(session.title)} — FINAL SCORECARD</b>\n` +
+  // Cutoff evaluation
+  const cutoffTarget = session.isExpress ? Math.round(pattern.cutoffEstimate * 0.25) : pattern.cutoffEstimate;
+  const isQualified = netTotalMarks >= cutoffTarget;
+  const cutoffStatus = isQualified ? '🟢 <b>QUALIFIED</b>' : '🟡 <b>NEEDS FOCUS</b>';
+
+  recordQuizStats(chatId, pattern.examKey, 'Full Mock Exam', totalCorrect, session.questions.length);
+
+  let text = `🏁 <b>${escapeHTML(session.title)} — OFFICIAL SCORECARD</b>\n` +
     `━━━━━━━━━━━━━━━━━━━━\n` +
-    `🏆 <b>Score:</b> ${correctCount} / ${total}\n` +
-    `📊 <b>Accuracy:</b> ${pct}%\n` +
-    `⏱️ <b>Total Time Taken:</b> ${min}m ${sec}s\n` +
-    `⚡ <b>Avg Speed:</b> ${Math.round(totalSec / total)}s / question\n\n` +
-    `🎯 <b>Exam Grade:</b> ${grade}\n` +
-    `🤖 <b>AI Generator:</b> <code>${escapeHTML(session.modelUsed)}</code>\n\n` +
+    `🏆 <b>Net Score:</b> <code>${netTotalMarks.toFixed(2)} / ${maxPossibleMarks.toFixed(2)} Marks</code> (${percentage}%)\n` +
+    `🎯 <b>Cutoff Status:</b> ${cutoffStatus} <i>(Target: ~${cutoffTarget} Marks)</i>\n\n` +
+    `📊 <b>Overall Performance Summary:</b>\n` +
+    `• 🟢 <b>Correct:</b> <code>${totalCorrect}</code> (+${totalPosMarks.toFixed(2)} Marks)\n` +
+    `• 🔴 <b>Wrong:</b>   <code>${totalWrong}</code> (-${totalNegMarks.toFixed(2)} Penalty)\n` +
+    `• ⚪ <b>Skipped:</b> <code>${totalSkipped}</code>\n` +
+    `• 🎯 <b>Accuracy:</b> <b>${overallAccuracy}%</b>\n` +
+    `• ⏱️ <b>Time Taken:</b> <code>${min}m ${sec}s</code>\n` +
+    `• ⚡ <b>Avg Speed:</b> <code>${Math.round(totalElapsedSec / (totalAttempted || 1))}s / question</code>\n\n` +
+    `📚 <b>Section-Wise Performance Breakdown:</b>\n`;
+
+  session.sections.forEach((sec, idx) => {
+    const s = sectionStats[idx];
+    const secAcc = (s.correct + s.wrong) > 0 ? Math.round((s.correct / (s.correct + s.wrong)) * 100) : 0;
+    text += `\n${idx + 1}️⃣ <b>${escapeHTML(sec.name)}</b>\n` +
+      `   • Score: <code>${s.netMarks.toFixed(2)} Marks</code> (+${s.posMarks.toFixed(2)}, -${s.negMarks.toFixed(2)})\n` +
+      `   • Qs: 🟢 ${s.correct} | 🔴 ${s.wrong} | ⚪ ${s.skipped} | Acc: <b>${secAcc}%</b>\n`;
+  });
+
+  text += `\n🤖 <b>AI Engine:</b> <code>${escapeHTML(session.modelUsed)}</code>\n` +
     `<i>All questions synced to your Notion Vault!</i>`;
 
   const keyboard = {
     inline_keyboard: [
       wrongAnswers.length > 0 ? [{ text: `🔁 Review ${wrongAnswers.length} Wrong / Skipped Answers`, callback_data: 'review_wrong' }] : [],
-      [{ text: '📈 View My Stats', callback_data: 'view_stats' }],
+      [{ text: '📈 View Performance Stats', callback_data: 'view_stats' }],
       [{ text: '🏠 Main Menu', callback_data: 'main_menu' }]
     ].filter(r => r.length > 0)
   };
@@ -2446,7 +3124,11 @@ function finishMockExam(chatId, messageId) {
     reviewSessions.set(chatId, { wrong: wrongAnswers, current: 0 });
   }
 
-  bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML', reply_markup: keyboard }).catch(() => {});
+  if (messageId) {
+    bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML', reply_markup: keyboard }).catch(() => {});
+  } else {
+    bot.sendMessage(chatId, text, { parse_mode: 'HTML', reply_markup: keyboard });
+  }
   activeMockExams.delete(chatId);
 }
 
@@ -4202,6 +4884,27 @@ Status: <b>${schedule.status.toUpperCase()}</b>
       return;
     }
 
+    if (data.startsWith('start_mock_select_')) {
+      const patternKey = data.replace('start_mock_select_', '');
+      showMockExamTypeSelection(chatId, patternKey, query.message.message_id);
+      bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    if (data.startsWith('start_mock_full_')) {
+      const patternKey = data.replace('start_mock_full_', '');
+      startMockOrPyqSession(chatId, patternKey, null, null, false, false);
+      bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    if (data.startsWith('start_mock_express_')) {
+      const patternKey = data.replace('start_mock_express_', '');
+      startMockOrPyqSession(chatId, patternKey, null, null, false, true);
+      bot.answerCallbackQuery(query.id);
+      return;
+    }
+
     if (data === 'pyq_menu') {
       showPyqMenu(chatId, query.message.message_id);
       bot.answerCallbackQuery(query.id);
@@ -4211,8 +4914,7 @@ Status: <b>${schedule.status.toUpperCase()}</b>
     if (data.startsWith('start_mock_')) {
       const parts = data.replace('start_mock_', '').split('_');
       const exam = parts[0];
-      const count = parseInt(parts[1]) || 25;
-      startMockOrPyqSession(chatId, exam, count, `${exam} Full-Length Mock Exam`, false);
+      startMockOrPyqSession(chatId, exam, null, null, false, true);
       bot.answerCallbackQuery(query.id);
       return;
     }
@@ -4221,7 +4923,7 @@ Status: <b>${schedule.status.toUpperCase()}</b>
       const parts = data.replace('start_pyq_', '').split('_');
       const exam = parts[0];
       const year = parts[1] || '2023';
-      startMockOrPyqSession(chatId, exam, 25, `${exam} ${year} Official PYQ Paper`, true);
+      startMockOrPyqSession(chatId, exam, null, `${exam} ${year} Official PYQ Paper`, true, true);
       bot.answerCallbackQuery(query.id);
       return;
     }
@@ -4241,6 +4943,48 @@ Status: <b>${schedule.status.toUpperCase()}</b>
       } else {
         finishMockExam(chatId, query.message.message_id);
       }
+      bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    if (data === 'mock_finish_early') {
+      const session = activeMockExams.get(chatId);
+      if (session) {
+        finishMockExam(chatId, query.message.message_id);
+      }
+      bot.answerCallbackQuery(query.id, 'Mock Exam Submitted!');
+      return;
+    }
+
+    if (data === 'mock_switch_sec_menu') {
+      const session = activeMockExams.get(chatId);
+      if (session) {
+        let text = `📌 <b>Switch Exam Section:</b>\nSelect a section to jump directly:`;
+        const keyboard = [];
+        session.sections.forEach((sec, idx) => {
+          keyboard.push([{ text: `Section ${idx + 1}: ${sec.name}`, callback_data: `mock_jump_sec_${idx}` }]);
+        });
+        keyboard.push([{ text: '🔙 Back to Current Question', callback_data: 'mock_resume_q' }]);
+        bot.editMessageText(text, { chat_id: chatId, message_id: query.message.message_id, parse_mode: 'HTML', reply_markup: { inline_keyboard: keyboard } }).catch(() => {});
+      }
+      bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    if (data.startsWith('mock_jump_sec_')) {
+      const secIdx = parseInt(data.replace('mock_jump_sec_', ''));
+      const session = activeMockExams.get(chatId);
+      if (session && !isNaN(secIdx) && session.sectionStartIndices[secIdx] !== undefined) {
+        session.currentSectionIndex = secIdx;
+        session.current = session.sectionStartIndices[secIdx];
+        renderMockQuestion(chatId, query.message.message_id);
+      }
+      bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    if (data === 'mock_resume_q') {
+      renderMockQuestion(chatId, query.message.message_id);
       bot.answerCallbackQuery(query.id);
       return;
     }
@@ -4477,14 +5221,14 @@ http.createServer(async (req, res) => {
       </ul>
     </div>
     <div class="card">
-      <div class="card-title">Supported Exams</div>
-      <div class="card-value" style="font-size:1.4rem;">5 Core Categories</div>
+      <div class="card-title">Mock Exam Modes</div>
+      <div class="card-value" style="font-size:1.4rem;">5 Official Categories</div>
       <ul class="status-list">
-        <li><span>🎖️ SSC Exams</span><b>CGL, CHSL, MTS</b></li>
-        <li><span>🚂 Railway Exams</span><b>RRB NTPC, Group D</b></li>
-        <li><span>🏛️ TNPSC</span><b>Group 1, 2, 4</b></li>
-        <li><span>🏦 Banking</span><b>IBPS, SBI PO</b></li>
-        <li><span>⚙️ Engineering</span><b>RRB JE, SSC JE</b></li>
+        <li><span>🎖️ SSC CGL (Tier 1)</span><b>100 Qs | 60m (15m/sec) | +2/-0.5</b></li>
+        <li><span>🚂 RRB NTPC (CBT 1)</span><b>100 Qs | 90m (Comp) | +1/-0.33</b></li>
+        <li><span>🏛️ TNPSC Prelims (Group 1)</span><b>200 Qs | 180m (Comp) | +1.5/NoNeg</b></li>
+        <li><span>🏦 Bank Prelims (PO)</span><b>100 Qs | 60m (20m/sec) | +1/-0.25</b></li>
+        <li><span>⚙️ JE Tech (RRB JE)</span><b>CBT1 (100 Qs) & CBT2 (150 Qs)</b></li>
       </ul>
     </div>
   </div>
