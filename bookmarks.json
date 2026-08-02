@@ -1,0 +1,43 @@
+[
+  [
+    1126347308,
+    [
+      {
+        "q": {
+          "type": "Year & Date-Based",
+          "question": "In which year did Humayun suffer a decisive defeat at the hands of Sher Shah Suri in the Battle of Kannauj (also known as Battle of Bilgram), leading to his exile?",
+          "optionA": "1539 A.D.",
+          "optionB": "1540 A.D.",
+          "optionC": "1541 A.D.",
+          "optionD": "1542 A.D.",
+          "correctAnswer": "B",
+          "explanation": "✅ Correct: The Battle of Kannauj (or Bilgram) took place in 1540 A.D., where Sher Shah Suri completely routed Humayun's forces, forcing him into exile. ❌ A: 1539 A.D. was the year of the Battle of Chausa, another defeat for Humayun. ❌ C, D: These years are incorrect for the Battle of Kannauj.",
+          "difficulty": "Easy",
+          "trick": "",
+          "pyqTag": "TNPSC Group 2 2011 PYQ"
+        },
+        "exam": "TNPSC",
+        "subject": "History and Culture of india",
+        "topic": "Humayun"
+      },
+      {
+        "q": {
+          "type": "Arithmetic",
+          "question": "A dishonest fruit vendor claims to sell fruits at the cost price but uses a false weight of 900 grams for 1 kg. What is his actual profit percentage?",
+          "optionA": "10%",
+          "optionB": "11.11%",
+          "optionC": "9.09%",
+          "optionD": "12.5%",
+          "correctAnswer": "B",
+          "explanation": "✅ Correct: Assume the Cost Price (CP) of 1 kg (1000 grams) of fruit is ₹1000 (i.e., ₹1 per gram). The vendor uses a false weight of 900 grams. So, he actually sells 900 grams of fruit. The actual cost of 900 grams of fruit to him is ₹900. However, he charges the customer for 1 kg (1000 grams) at the cost price. So, his Selling Price (SP) is ₹1000. Profit = SP - Actual CP = 1000 - 900 = ₹100. Profit Percentage = (Profit / Actual CP) * 100 = (100 / 900) * 100 = 100/9 % = 11.11...%. ❌ A (10%): This would be (100/1000)*100, which is incorrect as the base CP is for 900g, not 1000g. ❌ C (9.09%): This would be if the profit was calculated as (100/1100)*100, which is incorrect. ❌ D (12.5%): A result of significant calculation error.",
+          "difficulty": "Moderate",
+          "trick": "Remember profit is calculated on actual cost to vendor.",
+          "pyqTag": "IBPS Clerk 2022 PYQ"
+        },
+        "exam": "Bank",
+        "subject": "Quants",
+        "topic": "Profit & Loss"
+      }
+    ]
+  ]
+]

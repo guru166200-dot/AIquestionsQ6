@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: examvault-advanced-bot
+    env: docker
+    plan: free
+    region: oregon 
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: NOTION_API_KEY
+        sync: false
+      - key: NOTION_PARENT_DB
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: NODE_VERSION
+        value: 20
+    healthCheckPath: /
+    autoDeploy: true
