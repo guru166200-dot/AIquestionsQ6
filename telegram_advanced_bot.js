@@ -1394,12 +1394,23 @@ async function generatePyqYearQuestions(examCatalogKey, year, section, subject, 
       }
     }
 
-    if (batchResult && batchResult.questions.length > 0) {
+    if (batchResult && batchResult.questions && batchResult.questions.length > 0) {
       allQuestions.push(...batchResult.questions);
       modelUsedSet.add(batchResult.modelUsed);
     } else {
-      console.warn(`[PYQ] All models failed for ${section} batch ${b + 1}`);
-      if (allQuestions.length === 0 && b === 0) return null;
+      console.warn(`[PYQ] Specialized batch ${b + 1} failed for ${section}. Attempting fallback set generator...`);
+      const fallbackBatch = await generateSingleSetQuestions(section, catalog.examKey, subject, currentCount, null, b);
+      if (fallbackBatch && fallbackBatch.questions && fallbackBatch.questions.length > 0) {
+        allQuestions.push(...fallbackBatch.questions);
+        if (fallbackBatch.modelUsed) modelUsedSet.add(fallbackBatch.modelUsed);
+      } else {
+        console.warn(`[PYQ] Retry 2 for batch ${b + 1} for ${section}...`);
+        const retryBatch = await generateSingleSetQuestions(section, catalog.examKey, subject, currentCount, null, b + 50);
+        if (retryBatch && retryBatch.questions && retryBatch.questions.length > 0) {
+          allQuestions.push(...retryBatch.questions);
+          if (retryBatch.modelUsed) modelUsedSet.add(retryBatch.modelUsed);
+        }
+      }
     }
   }
 
@@ -1892,12 +1903,23 @@ async function generateMockSectionQuestions(exam, section, subject, count, patte
       }
     }
 
-    if (batchResult && batchResult.questions.length > 0) {
+    if (batchResult && batchResult.questions && batchResult.questions.length > 0) {
       allQuestions.push(...batchResult.questions);
       modelUsedSet.add(batchResult.modelUsed);
     } else {
-      console.warn(`[MockGen] All models failed for section "${section}" batch ${b + 1}. Skipping.`);
-      if (allQuestions.length === 0 && b === 0) return null; // Critical failure on first batch
+      console.warn(`[MockGen] Specialized batch ${b + 1} failed for "${section}". Attempting fallback set generator...`);
+      const fallbackBatch = await generateSingleSetQuestions(section, exam, subject, currentCount, null, b);
+      if (fallbackBatch && fallbackBatch.questions && fallbackBatch.questions.length > 0) {
+        allQuestions.push(...fallbackBatch.questions);
+        if (fallbackBatch.modelUsed) modelUsedSet.add(fallbackBatch.modelUsed);
+      } else {
+        console.warn(`[MockGen] Retry 2 for batch ${b + 1} for "${section}"...`);
+        const retryBatch = await generateSingleSetQuestions(section, exam, subject, currentCount, null, b + 50);
+        if (retryBatch && retryBatch.questions && retryBatch.questions.length > 0) {
+          allQuestions.push(...retryBatch.questions);
+          if (retryBatch.modelUsed) modelUsedSet.add(retryBatch.modelUsed);
+        }
+      }
     }
   }
 
