@@ -973,7 +973,608 @@ function isBankSetBasedHelper(exam, topic) {
   );
 }
 
+// ==================== PYQ (PREVIOUS YEAR QUESTIONS) ENGINE ====================
+// Auto-updating year range: 2010 → current year. No manual update needed.
+
+const CURRENT_YEAR = new Date().getFullYear();
+
+// Exam-wise PYQ availability — start year per exam (auto-extends to CURRENT_YEAR)
+const PYQ_EXAM_CATALOG = {
+  SSC_CGL: {
+    examKey: 'SSC',
+    name: 'SSC CGL',
+    icon: '🎖️',
+    fullName: 'Staff Selection Commission — Combined Graduate Level',
+    startYear: 2010,
+    sections: [
+      { name: 'General Intelligence & Reasoning', subject: 'Reasoning', questions: 25 },
+      { name: 'General Awareness', subject: 'General Knowledge', questions: 25 },
+      { name: 'Quantitative Aptitude', subject: 'Quants', questions: 25 },
+      { name: 'English Comprehension', subject: 'English', questions: 25 }
+    ],
+    marking: { positive: 2, negative: 0.5 },
+    duration: 60,
+    highlights: ['Tier 1', '100 Qs', '200 Marks', '+2/-0.5']
+  },
+  SSC_CHSL: {
+    examKey: 'SSC',
+    name: 'SSC CHSL',
+    icon: '🎖️',
+    fullName: 'Staff Selection Commission — Combined Higher Secondary Level',
+    startYear: 2013,
+    sections: [
+      { name: 'General Intelligence & Reasoning', subject: 'Reasoning', questions: 25 },
+      { name: 'General Awareness', subject: 'General Knowledge', questions: 25 },
+      { name: 'Quantitative Aptitude', subject: 'Quants', questions: 25 },
+      { name: 'English Language', subject: 'English', questions: 25 }
+    ],
+    marking: { positive: 2, negative: 0.5 },
+    duration: 60,
+    highlights: ['Tier 1', '100 Qs', '200 Marks', '+2/-0.5']
+  },
+  RRB_NTPC: {
+    examKey: 'RRB',
+    name: 'RRB NTPC',
+    icon: '🚂',
+    fullName: 'Railway Recruitment Board — Non-Technical Popular Category (CBT 1)',
+    startYear: 2016,
+    sections: [
+      { name: 'Mathematics', subject: 'Quants', questions: 30 },
+      { name: 'General Intelligence & Reasoning', subject: 'Reasoning', questions: 30 },
+      { name: 'General Awareness', subject: 'General Knowledge', questions: 40 }
+    ],
+    marking: { positive: 1, negative: 0.33 },
+    duration: 90,
+    highlights: ['CBT 1', '100 Qs', '100 Marks', '+1/-0.33']
+  },
+  RRB_GROUP_D: {
+    examKey: 'RRB',
+    name: 'RRB Group D',
+    icon: '🚂',
+    fullName: 'Railway Recruitment Board — Group D CBT',
+    startYear: 2018,
+    sections: [
+      { name: 'Mathematics', subject: 'Quants', questions: 25 },
+      { name: 'General Intelligence & Reasoning', subject: 'Reasoning', questions: 30 },
+      { name: 'General Science', subject: 'General Science', questions: 25 },
+      { name: 'General Awareness & Current Affairs', subject: 'General Knowledge', questions: 20 }
+    ],
+    marking: { positive: 1, negative: 0.33 },
+    duration: 90,
+    highlights: ['CBT', '100 Qs', '100 Marks', '+1/-0.33']
+  },
+  TNPSC_GROUP1: {
+    examKey: 'TNPSC',
+    name: 'TNPSC Group 1',
+    icon: '🏛️',
+    fullName: 'Tamil Nadu Public Service Commission — Group 1 Preliminary',
+    startYear: 2010,
+    sections: [
+      { name: 'General Studies', subject: 'General Knowledge', questions: 100 },
+      { name: 'Aptitude & Mental Ability', subject: 'Quants', questions: 50 },
+      { name: 'Tamil Language Eligibility Test', subject: 'General Knowledge', questions: 50 }
+    ],
+    marking: { positive: 1.5, negative: 0 },
+    duration: 180,
+    highlights: ['Prelims', '200 Qs', '300 Marks', 'No Negative']
+  },
+  TNPSC_GROUP2: {
+    examKey: 'TNPSC',
+    name: 'TNPSC Group 2',
+    icon: '🏛️',
+    fullName: 'Tamil Nadu Public Service Commission — Group 2 Preliminary',
+    startYear: 2011,
+    sections: [
+      { name: 'General Studies', subject: 'General Knowledge', questions: 75 },
+      { name: 'Aptitude & Mental Ability', subject: 'Quants', questions: 25 }
+    ],
+    marking: { positive: 1, negative: 0 },
+    duration: 120,
+    highlights: ['Prelims', '100 Qs', '100 Marks', 'No Negative']
+  },
+  TNPSC_GROUP4: {
+    examKey: 'TNPSC',
+    name: 'TNPSC Group 4',
+    icon: '🏛️',
+    fullName: 'Tamil Nadu Public Service Commission — Group 4 / VAO',
+    startYear: 2010,
+    sections: [
+      { name: 'General Studies', subject: 'General Knowledge', questions: 75 },
+      { name: 'Aptitude & Mental Ability', subject: 'Quants', questions: 25 }
+    ],
+    marking: { positive: 1, negative: 0 },
+    duration: 120,
+    highlights: ['Exam', '100 Qs', '100 Marks', 'No Negative']
+  },
+  BANK_IBPS_PO: {
+    examKey: 'Bank',
+    name: 'IBPS PO',
+    icon: '🏦',
+    fullName: 'Institute of Banking Personnel Selection — Probationary Officer Prelims',
+    startYear: 2011,
+    sections: [
+      { name: 'Reasoning Ability', subject: 'Reasoning', questions: 35 },
+      { name: 'Quantitative Aptitude', subject: 'Quants', questions: 35 },
+      { name: 'English Language', subject: 'English', questions: 30 }
+    ],
+    marking: { positive: 1, negative: 0.25 },
+    duration: 60,
+    highlights: ['Prelims', '100 Qs', '100 Marks', '+1/-0.25']
+  },
+  BANK_SBI_PO: {
+    examKey: 'Bank',
+    name: 'SBI PO',
+    icon: '🏦',
+    fullName: 'State Bank of India — Probationary Officer Prelims',
+    startYear: 2010,
+    sections: [
+      { name: 'Reasoning Ability', subject: 'Reasoning', questions: 35 },
+      { name: 'Quantitative Aptitude', subject: 'Quants', questions: 35 },
+      { name: 'English Language', subject: 'English', questions: 30 }
+    ],
+    marking: { positive: 1, negative: 0.25 },
+    duration: 60,
+    highlights: ['Prelims', '100 Qs', '100 Marks', '+1/-0.25']
+  },
+  BANK_IBPS_CLERK: {
+    examKey: 'Bank',
+    name: 'IBPS Clerk',
+    icon: '🏦',
+    fullName: 'Institute of Banking Personnel Selection — Clerk Prelims',
+    startYear: 2011,
+    sections: [
+      { name: 'Reasoning Ability', subject: 'Reasoning', questions: 35 },
+      { name: 'Quantitative Aptitude', subject: 'Quants', questions: 35 },
+      { name: 'English Language', subject: 'English', questions: 30 }
+    ],
+    marking: { positive: 1, negative: 0.25 },
+    duration: 60,
+    highlights: ['Prelims', '100 Qs', '100 Marks', '+1/-0.25']
+  },
+  RRB_JE_CBT1: {
+    examKey: 'JE',
+    name: 'RRB JE CBT 1',
+    icon: '⚙️',
+    fullName: 'Railway Recruitment Board — Junior Engineer CBT Stage 1',
+    startYear: 2015,
+    sections: [
+      { name: 'Mathematics', subject: 'Quants', questions: 30 },
+      { name: 'General Intelligence & Reasoning', subject: 'Reasoning', questions: 25 },
+      { name: 'General Awareness', subject: 'General Knowledge', questions: 15 },
+      { name: 'Physics & Chemistry (General Science)', subject: 'General Science', questions: 15 },
+      { name: 'Computer Basics & Environment', subject: 'Computer Awareness', questions: 15 }
+    ],
+    marking: { positive: 1, negative: 0.33 },
+    duration: 90,
+    highlights: ['Stage 1', '100 Qs', '100 Marks', '+1/-0.33']
+  },
+  SSC_JE: {
+    examKey: 'JE',
+    name: 'SSC JE',
+    icon: '⚙️',
+    fullName: 'Staff Selection Commission — Junior Engineer Paper 1',
+    startYear: 2013,
+    sections: [
+      { name: 'General Intelligence & Reasoning', subject: 'Reasoning', questions: 50 },
+      { name: 'General Awareness', subject: 'General Knowledge', questions: 50 },
+      { name: 'Technical Knowledge (Mechanical)', subject: 'Mechanical', questions: 100 }
+    ],
+    marking: { positive: 1, negative: 0.25 },
+    duration: 120,
+    highlights: ['Paper 1', '200 Qs', '200 Marks', '+1/-0.25']
+  }
+};
+
+// Generate year list from exam start year to current year (auto-expands each new year)
+function getPyqYearList(examKey) {
+  const catalog = PYQ_EXAM_CATALOG[examKey];
+  if (!catalog) return [];
+  const years = [];
+  for (let y = CURRENT_YEAR; y >= catalog.startYear; y--) {
+    years.push(y);
+  }
+  return years;
+}
+
+// Build PYQ year-specific prompt to simulate that specific exam year
+function getPyqSystemPrompt(examCatalog, year, section, subject, count, batchIndex = 0) {
+  const seed = `PYQ_${examCatalog.name}_${year}_${section}_b${batchIndex}_${Date.now().toString(36)}`;
+  const markingNote = examCatalog.marking.negative > 0
+    ? `+${examCatalog.marking.positive} for correct | -${examCatalog.marking.negative.toFixed(2)} negative marking`
+    : `+${examCatalog.marking.positive} for correct | NO negative marking`;
+
+  const yearContext = year === CURRENT_YEAR
+    ? `the MOST RECENT ${examCatalog.name} exam (${year}) — use the latest syllabus updates, recently asked topics, and current affairs up to ${year}`
+    : `the OFFICIAL ${examCatalog.name} ${year} paper — replicate the question style, difficulty, topic distribution, and phrasing pattern of that specific exam year`;
+
+  return `You are an EXPERT PYQ (Previous Year Question) Analyst and Reconstructor with a complete database of all ${examCatalog.fullName} question papers from ${examCatalog.startYear} to ${CURRENT_YEAR}.
+
+Your task: Generate EXACTLY ${count} MCQs that PRECISELY SIMULATE ${yearContext}.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PYQ SESSION PARAMETERS:
+• Exam: ${examCatalog.fullName}
+• Year: ${year} Official Paper
+• Section: ${section}
+• Subject Domain: ${subject}
+• Questions: ${count}
+• Marking: ${markingNote}
+• Unique Session Seed: [${seed}]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+YEAR-SPECIFIC AUTHENTICITY RULES:
+${year <= 2015 ? `• This is an EARLY-ERA ${examCatalog.name} paper (${year}). Questions were simpler, more direct, and factual. Focus on foundational concepts without complex multi-step reasoning.` : ''}
+${year >= 2016 && year <= 2019 ? `• This is a MID-ERA ${examCatalog.name} paper (${year}). Questions became more analytical. Include more statement-based and match-the-following types.` : ''}
+${year >= 2020 && year <= 2022 ? `• This is a COVID/POST-COVID ERA ${examCatalog.name} paper (${year}). Topics shifted to: COVID-related GK, digital India, online banking, remote work, health & science focus. Moderate to high difficulty.` : ''}
+${year >= 2023 ? `• This is a MODERN-ERA ${examCatalog.name} paper (${year}). Highest analytical difficulty. Include: AI/tech awareness, recent geopolitical events, India@75/India@100 topics, G20 2023 content (if applicable), latest government schemes (PM Vishwakarma, Amrit Bharat, etc.), recent sports events, current affairs up to ${year}.` : ''}
+
+SECTION-SPECIFIC RULES FOR "${section}":
+${subject.toLowerCase().includes('reason') ? `• Reasoning (${year}): Include all sub-types that appeared in this era — Seating Arrangement (Linear/Circular), Puzzle, Syllogism, Coding-Decoding, Blood Relations, Direction Sense, Number/Alphabet Series, Analogy, Classification. ${year >= 2020 ? 'Post-2020: Add complex multi-step puzzles and inequality-based questions.' : 'Pre-2020: Focus on direct pattern-based questions.'}` : ''}
+${subject.toLowerCase().includes('quant') || subject.toLowerCase().includes('math') ? `• Quants (${year}): Include all Arithmetic topics — Percentage, Profit/Loss, SI/CI, Ratio, TW, TSD, Mensuration, Geometry, Trigonometry, Algebra, DI. ${year >= 2019 ? 'Post-2019: Include Data Interpretation (Table/Chart) questions — 1 complete DI set of 5 questions.' : 'Pre-2019: Focus on arithmetic word problems and direct formula application.'}` : ''}
+${subject.toLowerCase().includes('english') ? `• English (${year}): Include Reading Comprehension (1 passage), Fill in the Blanks, Spotting Errors, Sentence Improvement, Synonyms/Antonyms, Idioms & Phrases, One Word Substitution. ${year >= 2020 ? 'Post-2020: Higher-level vocabulary and inferential RC questions.' : ''}` : ''}
+${subject.toLowerCase().includes('general knowledge') || subject.toLowerCase().includes('awareness') || subject.toLowerCase().includes('gk') ? `• GK/GA (${year}): Mix History, Polity, Geography, Economy, Science, and MANDATORY current affairs from the ${year} period. Include events, appointments, awards, summits, and government schemes that were RELEVANT in ${year}.` : ''}
+${subject.toLowerCase().includes('science') ? `• General Science (${year}): Physics, Chemistry, Biology basics. ${year >= 2020 ? 'Post-2020: Include COVID-19 science, vaccines, biotechnology, space missions (Chandrayaan, Artemis), renewable energy.' : ''} Emphasize NCERT Class 8-10 level concepts.` : ''}
+${subject.toLowerCase().includes('mechanic') || subject.toLowerCase().includes('technical') ? `• Technical/Mechanical (${year}): Fluid Mechanics, Thermodynamics, SOM, TOM, Production Engineering. Include numerical problems from actual GATE/RRB JE ${year} papers. ${year >= 2019 ? 'Post-2019: Add questions on smart manufacturing, CNC, FEA basics.' : ''}` : ''}
+${subject.toLowerCase().includes('computer') ? `• Computer Awareness (${year}): ${year <= 2015 ? 'Focus on MS Office, basic hardware, internet basics.' : year <= 2019 ? 'Add networking, cybersecurity basics, cloud basics.' : 'Add AI/ML awareness, digital payments, cybersecurity, social media policies.'}` : ''}
+${subject.toLowerCase().includes('environ') ? `• Environment (${year}): Environmental Acts, pollution types, ecology, biodiversity. Include environment-related events from ${year}.` : ''}
+
+CONTENT DISTRIBUTION (YEAR-AUTHENTIC):
+• 60% ACTUAL PYQs: Questions that were ACTUALLY ASKED in ${examCatalog.name} exams around ${year} — reconstruct them from memory/official sources. Tag each: "${examCatalog.name} ${year} PYQ".
+• 25% NEAR-PYQ: Questions on the SAME TOPICS and SAME DIFFICULTY as the ${year} paper. Tag: "Similar to ${examCatalog.name} ${year}".
+• 15% REPEAT TOPICS: High-frequency topics that appeared in multiple years including ${year}. Tag: "High Frequency Topic".
+
+ABSOLUTE QUALITY MANDATES:
+✗ BANNED: Any question that feels like a textbook exercise or practice app
+✗ BANNED: All 4 options being obviously different — distractors MUST be close-range values or similar-sounding names
+✗ BANNED: Questions that clearly belong to a different exam year (wrong current affairs, wrong scheme names)
+✓ REQUIRED: Year-specific current affairs and event context
+✓ REQUIRED: Same difficulty level as the actual ${year} paper
+✓ REQUIRED: Step-by-step explanation for numerical questions
+✓ REQUIRED: For Assertion-Reason: use exact standard 4-option format
+✓ REQUIRED: For Statement-type: use exactly 3 statements with "1 only / 2 and 3 only / 1 and 3 only / All of the above"
+
+OUTPUT FORMAT — STRICT JSON ONLY. No markdown. Start with { immediately.
+{
+  "questions": [
+    {
+      "type": "Direct|Year|Statement|Assertion-Reason|Match|Chronological|Arithmetic|Numerical|Puzzle|Comprehension",
+      "question": "Full question text as it appeared in official ${examCatalog.name} ${year} paper",
+      "optionA": "Trap-worthy plausible option A",
+      "optionB": "Trap-worthy plausible option B",
+      "optionC": "Trap-worthy plausible option C",
+      "optionD": "Trap-worthy plausible option D",
+      "correctAnswer": "A|B|C|D",
+      "explanation": "✅ Correct: [full reason]. ❌ A wrong: [why]. ❌ B wrong: [why]. ❌ C wrong: [why]. ❌ D wrong: [why].",
+      "difficulty": "Easy|Moderate|Hard",
+      "trick": "Memory tip or shortcut (empty string if none)",
+      "pyqTag": "${examCatalog.name} ${year} PYQ | Similar to ${examCatalog.name} ${year} | High Frequency Topic"
+    }
+  ]
+}`;
+}
+
+function getPyqUserPrompt(examCatalog, year, section, subject, count, batchIndex = 0) {
+  const seed = `PYQ_USER_${year}_${batchIndex}_${Math.random().toString(36).substring(2, 6)}`;
+  return `Generate EXACTLY ${count} MCQs simulating the OFFICIAL ${examCatalog.name} ${year} exam paper.
+Section: "${section}" | Subject: ${subject} | Year: ${year}
+Unique seed for this batch: [${seed}]
+
+MANDATORY:
+1. 60% must be actual PYQs from ${examCatalog.name} exams around ${year} — tag each as "${examCatalog.name} ${year} PYQ"
+2. Include year-specific current affairs, events, and context from ${year}
+3. All 4 options must be carefully crafted — no obviously wrong distractors
+4. Explanations must be thorough with step-by-step solutions for numerical questions
+5. Difficulty must match the ACTUAL ${year} paper standard
+6. Return EXACTLY ${count} questions — not fewer, not more
+7. This batch (seed ${seed}) must be completely unique from other batches`;
+}
+
+/**
+ * PYQ-specific question generator with year-aware prompt
+ * Simulates the exact difficulty, topics, and pattern of a specific exam year
+ */
+async function generatePyqYearQuestions(examCatalogKey, year, section, subject, count, batchIndex = 0) {
+  const catalog = PYQ_EXAM_CATALOG[examCatalogKey];
+  if (!catalog) return null;
+
+  const BATCH_SIZE = 5;
+  const totalBatches = Math.ceil(count / BATCH_SIZE);
+  let allQuestions = [];
+  let modelUsedSet = new Set();
+
+  for (let b = 0; b < totalBatches; b++) {
+    const currentCount = Math.min(BATCH_SIZE, count - allQuestions.length);
+    const sysPrompt = getPyqSystemPrompt(catalog, year, section, subject, currentCount, batchIndex * 100 + b);
+    const userPrompt = getPyqUserPrompt(catalog, year, section, subject, currentCount, batchIndex * 100 + b);
+
+    let batchResult = null;
+
+    // Gemini primary
+    const allGeminiModels = ['gemini-3.6-flash','gemini-3.5-flash','gemini-flash-latest','gemini-2.5-flash','gemini-2.0-flash','gemini-1.5-flash','gemini-1.5-pro'];
+    const modelsToTry = LAST_WORKING_GEMINI_MODEL
+      ? [LAST_WORKING_GEMINI_MODEL, ...allGeminiModels.filter(m => m !== LAST_WORKING_GEMINI_MODEL)]
+      : allGeminiModels;
+
+    for (const model of modelsToTry) {
+      try {
+        const response = await axios.post(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
+          {
+            systemInstruction: { parts: [{ text: sysPrompt }] },
+            contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+            generationConfig: { responseMimeType: 'application/json', temperature: 0.7, topP: 0.95, maxOutputTokens: 8192 }
+          },
+          { headers: { 'Content-Type': 'application/json' }, timeout: 90000 }
+        );
+        const data = response.data;
+        if (data.candidates && data.candidates[0] && data.candidates[0].content) {
+          const parsed = JSON.parse(data.candidates[0].content.parts[0].text);
+          if (parsed.questions && parsed.questions.length > 0) {
+            LAST_WORKING_GEMINI_MODEL = model;
+            batchResult = { questions: parsed.questions, modelUsed: `Gemini (${model})` };
+            const usage = data.usageMetadata || {};
+            recordTokenUsage(`Gemini (${model})`, { promptTokens: usage.promptTokenCount || 0, completionTokens: usage.candidatesTokenCount || 0, totalTokens: usage.totalTokenCount || 0 });
+            break;
+          }
+        }
+      } catch (e) {
+        if (model === LAST_WORKING_GEMINI_MODEL) LAST_WORKING_GEMINI_MODEL = null;
+        console.warn(`[PYQ] Gemini ${model} failed: ${e.message}`);
+      }
+    }
+
+    // Fallback: Groq
+    if (!batchResult) {
+      const groqKey = process.env.GROQ_API_KEY;
+      if (groqKey) {
+        for (const model of ['llama-3.3-70b-versatile', 'llama-3.1-70b-versatile']) {
+          try {
+            const resp = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
+              model, response_format: { type: 'json_object' },
+              messages: [{ role: 'system', content: sysPrompt }, { role: 'user', content: userPrompt }]
+            }, { headers: { 'Authorization': `Bearer ${groqKey}`, 'Content-Type': 'application/json' }, timeout: 60000 });
+            const parsed = JSON.parse(resp.data.choices[0].message.content);
+            if (parsed.questions && parsed.questions.length > 0) {
+              batchResult = { questions: parsed.questions, modelUsed: `Groq (${model})` };
+              break;
+            }
+          } catch (e2) { console.warn(`[PYQ] Groq ${model} failed: ${e2.message}`); }
+        }
+      }
+    }
+
+    // Fallback: ChatGPT
+    if (!batchResult && OPENAI_API_KEY) {
+      for (const model of ['gpt-4o-mini', 'gpt-4o', 'gpt-3.5-turbo']) {
+        try {
+          const resp = await axios.post('https://api.openai.com/v1/chat/completions', {
+            model, response_format: { type: 'json_object' },
+            messages: [{ role: 'system', content: sysPrompt }, { role: 'user', content: userPrompt }]
+          }, { headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_API_KEY}` }, timeout: 60000 });
+          const parsed = JSON.parse(resp.data.choices[0].message.content);
+          if (parsed.questions && parsed.questions.length > 0) {
+            batchResult = { questions: parsed.questions, modelUsed: `ChatGPT (${model})` };
+            break;
+          }
+        } catch (e3) { console.warn(`[PYQ] ChatGPT ${model} failed: ${e3.message}`); }
+      }
+    }
+
+    if (batchResult && batchResult.questions.length > 0) {
+      allQuestions.push(...batchResult.questions);
+      modelUsedSet.add(batchResult.modelUsed);
+    } else {
+      console.warn(`[PYQ] All models failed for ${section} batch ${b + 1}`);
+      if (allQuestions.length === 0 && b === 0) return null;
+    }
+  }
+
+  if (allQuestions.length === 0) return null;
+  return { questions: allQuestions.slice(0, count), modelUsed: Array.from(modelUsedSet).join(', ') || 'PYQ AI Engine' };
+}
+
+/**
+ * Show PYQ exam category selection menu (dynamically lists all exams)
+ */
+function showPyqExamMenu(chatId, messageId = null) {
+  const now = new Date().getFullYear();
+  const text =
+    `📑 <b>Official PYQ Simulator — Previous Year Exam Papers</b>\n` +
+    `━━━━━━━━━━━━━━━━━━━━\n` +
+    `📅 <b>Coverage: 2010 – ${now}</b> (Auto-updated every year)\n\n` +
+    `Select an exam to browse its official year-wise papers:`;
+
+  const keyboard = {
+    inline_keyboard: [
+      [
+        { text: '🎖️ SSC CGL', callback_data: 'pyq_exam_SSC_CGL' },
+        { text: '🎖️ SSC CHSL', callback_data: 'pyq_exam_SSC_CHSL' }
+      ],
+      [
+        { text: '🚂 RRB NTPC', callback_data: 'pyq_exam_RRB_NTPC' },
+        { text: '🚂 RRB Group D', callback_data: 'pyq_exam_RRB_GROUP_D' }
+      ],
+      [
+        { text: '🏛️ TNPSC Group 1', callback_data: 'pyq_exam_TNPSC_GROUP1' },
+        { text: '🏛️ TNPSC Group 2', callback_data: 'pyq_exam_TNPSC_GROUP2' }
+      ],
+      [{ text: '🏛️ TNPSC Group 4 / VAO', callback_data: 'pyq_exam_TNPSC_GROUP4' }],
+      [
+        { text: '🏦 IBPS PO', callback_data: 'pyq_exam_BANK_IBPS_PO' },
+        { text: '🏦 SBI PO', callback_data: 'pyq_exam_BANK_SBI_PO' }
+      ],
+      [{ text: '🏦 IBPS Clerk', callback_data: 'pyq_exam_BANK_IBPS_CLERK' }],
+      [
+        { text: '⚙️ RRB JE CBT 1', callback_data: 'pyq_exam_RRB_JE_CBT1' },
+        { text: '⚙️ SSC JE', callback_data: 'pyq_exam_SSC_JE' }
+      ],
+      [{ text: '🔙 Main Menu', callback_data: 'main_menu' }]
+    ]
+  };
+
+  if (messageId) {
+    bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML', reply_markup: keyboard }).catch(() => {});
+  } else {
+    bot.sendMessage(chatId, text, { parse_mode: 'HTML', reply_markup: keyboard });
+  }
+}
+
+/**
+ * Show year selection for a specific PYQ exam (auto-builds from startYear to CURRENT_YEAR)
+ */
+function showPyqYearMenu(chatId, examKey, messageId = null) {
+  const catalog = PYQ_EXAM_CATALOG[examKey];
+  if (!catalog) {
+    bot.sendMessage(chatId, '❌ Exam not found.');
+    return;
+  }
+
+  const years = getPyqYearList(examKey);
+  const totalQs = catalog.sections.reduce((s, sec) => s + sec.questions, 0);
+
+  let text =
+    `${catalog.icon} <b>${catalog.name} — Official PYQ Papers</b>\n` +
+    `━━━━━━━━━━━━━━━━━━━━\n` +
+    `📋 <b>${catalog.fullName}</b>\n` +
+    `📊 ${catalog.highlights.join(' | ')}\n` +
+    `⏱️ Duration: ${catalog.duration} minutes\n` +
+    `📅 Available Years: <b>${catalog.startYear} – ${CURRENT_YEAR}</b>\n\n` +
+    `Select a year to start the official paper simulation:`;
+
+  // Build year buttons — 3 per row (most recent first)
+  const keyboard = [];
+  for (let i = 0; i < years.length; i += 3) {
+    const row = [];
+    for (let j = i; j < Math.min(i + 3, years.length); j++) {
+      const yr = years[j];
+      const isLatest = yr === CURRENT_YEAR;
+      row.push({ text: isLatest ? `⭐ ${yr} (Latest)` : `📄 ${yr}`, callback_data: `start_pyq_${examKey}_${yr}` });
+    }
+    keyboard.push(row);
+  }
+  keyboard.push([{ text: '🔙 Back to Exam List', callback_data: 'show_pyq_menu' }]);
+
+  if (messageId) {
+    bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML', reply_markup: { inline_keyboard: keyboard } }).catch(() => {});
+  } else {
+    bot.sendMessage(chatId, text, { parse_mode: 'HTML', reply_markup: { inline_keyboard: keyboard } });
+  }
+}
+
+/**
+ * Start a full PYQ session for a specific exam year
+ */
+async function startPyqSession(chatId, examKey, year) {
+  const catalog = PYQ_EXAM_CATALOG[examKey];
+  if (!catalog) {
+    bot.sendMessage(chatId, '❌ Exam configuration not found.');
+    return;
+  }
+
+  const totalQs = catalog.sections.reduce((s, sec) => s + sec.questions, 0);
+  const examTitle = `${catalog.name} ${year} — Official PYQ Paper`;
+
+  const statusMsg = await bot.sendMessage(chatId,
+    `📑 <b>PYQ Paper Simulator Starting...</b>\n━━━━━━━━━━━━━━━━━━━━\n` +
+    `${catalog.icon} <b>${escapeHTML(examTitle)}</b>\n` +
+    `📊 Total: <b>${totalQs} Questions</b> | ${catalog.highlights.join(' | ')}\n` +
+    `🔍 Mode: <b>Year-Authentic PYQ Reconstruction</b>\n\n` +
+    `⏳ <i>Reconstructing ${year} official paper questions section by section...</i>`,
+    { parse_mode: 'HTML' }
+  );
+
+  let allQuestions = [];
+  let modelUsedSet = new Set();
+
+  for (let secIdx = 0; secIdx < catalog.sections.length; secIdx++) {
+    const sec = catalog.sections[secIdx];
+    const completedQs = allQuestions.length;
+    const progressPct = Math.round((completedQs / totalQs) * 100);
+
+    try {
+      bot.editMessageText(
+        `📑 <b>PYQ Paper Simulator</b>\n━━━━━━━━━━━━━━━━━━━━\n` +
+        `${catalog.icon} <b>${escapeHTML(examTitle)}</b>\n\n` +
+        `📌 <b>Section ${secIdx + 1}/${catalog.sections.length}:</b>\n` +
+        `    ${escapeHTML(sec.name)} — <b>${sec.questions} Qs</b>\n\n` +
+        `🔍 <b>Reconstructing ${year} official questions...</b>\n` +
+        `📊 Progress: <code>${completedQs}/${totalQs} done (${progressPct}%)</code>\n\n` +
+        `<i>Year-specific topics, difficulty, and current affairs are being matched to ${year} paper...</i>`,
+        { chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'HTML' }
+      ).catch(() => {});
+    } catch(e) {}
+
+    const result = await generatePyqYearQuestions(examKey, year, sec.name, sec.subject, sec.questions, secIdx);
+
+    if (!result || !result.questions || result.questions.length === 0) {
+      bot.editMessageText(
+        `❌ <b>Generation Failed!</b>\n\nCould not reconstruct questions for:\n<b>${escapeHTML(sec.name)}</b>\n\nPlease try a different year or use Full Mock Exam instead.`,
+        { chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'HTML' }
+      ).catch(() => {});
+      return;
+    }
+
+    if (result.modelUsed) modelUsedSet.add(result.modelUsed);
+
+    result.questions.forEach((q) => {
+      allQuestions.push({
+        ...q,
+        sectionName: sec.name,
+        sectionIndex: secIdx,
+        positiveMarks: catalog.marking.positive,
+        negativeMarks: catalog.marking.negative,
+        subject: sec.subject,
+        pyqYear: year,
+        examKey: examKey
+      });
+    });
+  }
+
+  // Build session start indices
+  const sectionStartIndices = [];
+  let runningIdx = 0;
+  catalog.sections.forEach(sec => {
+    sectionStartIndices.push(runningIdx);
+    runningIdx += sec.questions;
+  });
+
+  const session = {
+    patternKey: examKey,
+    pattern: { ...catalog, marking: catalog.marking, hasSectionalTimer: false, totalDuration: catalog.duration },
+    title: examTitle,
+    questions: allQuestions,
+    sections: catalog.sections,
+    sectionStartIndices,
+    current: 0,
+    currentSectionIndex: 0,
+    userAnswers: new Array(allQuestions.length).fill(null),
+    startTime: Date.now(),
+    sectionStartTimes: catalog.sections.map(() => Date.now()),
+    modelUsed: Array.from(modelUsedSet).join(', ') || 'PYQ AI Engine',
+    isPyq: true,
+    pyqYear: year,
+    isExpress: false
+  };
+
+  activeMockExams.set(chatId, session);
+
+  bot.editMessageText(
+    `✅ <b>${escapeHTML(examTitle)}</b>\n━━━━━━━━━━━━━━━━━━━━\n` +
+    `📊 <b>${totalQs} PYQ Questions</b> loaded!\n` +
+    `⏱️ Time Limit: <b>${catalog.duration} minutes</b>\n` +
+    `🔖 Marking: <b>${catalog.marking.positive > 0 ? '+' + catalog.marking.positive : catalog.marking.positive} Correct${catalog.marking.negative > 0 ? ' | -' + catalog.marking.negative.toFixed(2) + ' Wrong' : ' | No Negative'}</b>\n\n` +
+    `<i>Get ready! Your ${year} paper simulation begins now...</i>\n\n` +
+    `<b>📝 Starting Question 1...</b>`,
+    { chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'HTML' }
+  ).catch(() => {});
+
+  setTimeout(() => renderMockQuestion(chatId, null), 1500);
+}
+
+// ==================== END PYQ ENGINE ====================
+
 // ==================== FULL MOCK EXAM — ULTRA-STRICT PROMPT ENGINE ====================
+
 // Used exclusively by Full Mock Test mode to generate questions at or above real exam standard
 
 function getMockExamSystemPrompt(exam, section, subject, count, patternInfo, batchIndex = 0) {
@@ -2787,26 +3388,9 @@ function showMockExamTypeSelection(chatId, patternKey, messageId = null) {
   }
 }
 
+// showPyqMenu — redirects to the new dynamic PYQ exam catalog menu
 function showPyqMenu(chatId, messageId = null) {
-  const text = `📑 <b>Official Previous Year Question (PYQ) Simulator</b>\n━━━━━━━━━━━━━━━━━━━━\n` +
-    `Practice actual official question papers from 2020-2025!\n\nSelect a PYQ Paper:`;
-
-  const keyboard = {
-    inline_keyboard: [
-      [{ text: '🎖️ SSC CGL 2023 Official PYQ', callback_data: 'start_pyq_SSC_CGL_2023' }],
-      [{ text: '🚂 RRB NTPC 2021 Official PYQ', callback_data: 'start_pyq_RRB_NTPC_2021' }],
-      [{ text: '🏛️ TNPSC Group 1 2022 PYQ', callback_data: 'start_pyq_TNPSC_GROUP1_2022' }],
-      [{ text: '🏦 IBPS PO 2023 Official PYQ', callback_data: 'start_pyq_BANK_PRELIMS_2023' }],
-      [{ text: '⚙️ RRB JE 2019 Official PYQ', callback_data: 'start_pyq_RRB_JE_CBT1_2019' }],
-      [{ text: '🔙 Main Menu', callback_data: 'main_menu' }]
-    ]
-  };
-
-  if (messageId) {
-    bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML', reply_markup: keyboard }).catch(() => {});
-  } else {
-    bot.sendMessage(chatId, text, { parse_mode: 'HTML', reply_markup: keyboard });
-  }
+  showPyqExamMenu(chatId, messageId);
 }
 
 async function startMockOrPyqSession(chatId, patternKey, count = null, title = null, isPyq = false, isExpress = false) {
@@ -4919,11 +5503,45 @@ Status: <b>${schedule.status.toUpperCase()}</b>
       return;
     }
 
+    // === PYQ: Show exam list menu ===
+    if (data === 'show_pyq_menu') {
+      showPyqExamMenu(chatId, query.message.message_id);
+      bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    // === PYQ: Select exam → show year list ===
+    if (data.startsWith('pyq_exam_')) {
+      const examKey = data.replace('pyq_exam_', '');
+      showPyqYearMenu(chatId, examKey, query.message.message_id);
+      bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    // === PYQ: Select year → start PYQ session ===
     if (data.startsWith('start_pyq_')) {
-      const parts = data.replace('start_pyq_', '').split('_');
-      const exam = parts[0];
-      const year = parts[1] || '2023';
-      startMockOrPyqSession(chatId, exam, null, `${exam} ${year} Official PYQ Paper`, true, true);
+      // Format: start_pyq_<EXAM_KEY>_<YEAR>
+      // EXAM_KEY may contain underscores (e.g. SSC_CGL, RRB_GROUP_D, BANK_IBPS_PO)
+      // YEAR is always the last token (4-digit number)
+      const raw = data.replace('start_pyq_', '');
+      const tokens = raw.split('_');
+      const yearToken = tokens[tokens.length - 1];
+      const year = parseInt(yearToken, 10);
+
+      if (!isNaN(year) && year >= 2010 && year <= CURRENT_YEAR + 1) {
+        // Exam key = everything before the trailing year token
+        const examKey = tokens.slice(0, tokens.length - 1).join('_');
+        if (PYQ_EXAM_CATALOG[examKey]) {
+          // Use dedicated PYQ session (year-authentic)
+          startPyqSession(chatId, examKey, year);
+        } else {
+          // Legacy fallback: no catalog entry — use old startMockOrPyqSession
+          const legacyKey = tokens.slice(0, 2).join('_');
+          startMockOrPyqSession(chatId, legacyKey, null, `${legacyKey} ${year} Official PYQ Paper`, true, true);
+        }
+      } else {
+        bot.sendMessage(chatId, '❌ Invalid year selection. Please try again.');
+      }
       bot.answerCallbackQuery(query.id);
       return;
     }
