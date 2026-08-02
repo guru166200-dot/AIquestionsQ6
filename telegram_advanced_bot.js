@@ -213,13 +213,65 @@ async function getLiveTokenStatus(forceRefresh = false) {
   return status;
 }
 
+// Token usage stats persistence
+let globalTokenStats = {
+  totalPromptTokens: 0,
+  totalCompletionTokens: 0,
+  totalTokens: 0,
+  totalRequests: 0,
+  lastTestTokens: { promptTokens: 0, completionTokens: 0, totalTokens: 0, model: 'None' }
+};
+
+function saveTokenStats() {
+  try {
+    fs.writeFileSync('token_stats.json', JSON.stringify(globalTokenStats, null, 2), 'utf8');
+  } catch (err) {
+    console.error('Error saving token stats:', err.message);
+  }
+}
+
+function loadTokenStats() {
+  try {
+    if (fs.existsSync('token_stats.json')) {
+      const data = fs.readFileSync('token_stats.json', 'utf8');
+      globalTokenStats = JSON.parse(data);
+      console.log(`🔤 Loaded token stats: ${globalTokenStats.totalTokens} total tokens used.`);
+    }
+  } catch (err) {
+    console.error('Error loading token stats:', err.message);
+  }
+}
+
+function recordTokenUsage(model, usage) {
+  const p = usage.promptTokens || 0;
+  const c = usage.completionTokens || 0;
+  const t = usage.totalTokens || (p + c);
+
+  globalTokenStats.totalPromptTokens += p;
+  globalTokenStats.totalCompletionTokens += c;
+  globalTokenStats.totalTokens += t;
+  globalTokenStats.totalRequests += 1;
+  globalTokenStats.lastTestTokens = { promptTokens: p, completionTokens: c, totalTokens: t, model };
+
+  saveTokenStats();
+}
+
 function formatPinnedTokenDashboardText(status) {
+  const lastt = globalTokenStats.lastTestTokens;
+  const lastFormatted = lastt && lastt.totalTokens > 0 
+    ? `${lastt.totalTokens.toLocaleString()} tokens (${lastt.model})`
+    : 'None yet';
+
   return `📌 <b>LIVE AI MODEL & TOKEN DASHBOARD</b>\n` +
     `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
     `<b>🤖 Active AI Providers:</b>\n` +
     `• 🔵 <b>Gemini AI:</b> ${status.gemini.details}\n` +
     `• 🟣 <b>Groq (Llama 3.3):</b> ${status.groq.details}\n` +
     `• 🟢 <b>OpenAI (GPT-4o):</b> ${status.openai.details}\n\n` +
+    `<b>📊 Live Token Count & Usage:</b>\n` +
+    `• 🔤 <b>Last Generation:</b> <code>${lastFormatted}</code>\n` +
+    `• 📈 <b>Total Tokens Used:</b> <code>${globalTokenStats.totalTokens.toLocaleString()} tokens</code>\n` +
+    `• ⚡ <b>Total AI Calls:</b> <code>${globalTokenStats.totalRequests} requests</code>\n\n` +
     `<b>📂 Notion Vault:</b> ${status.notion.details}\n` +
     `<b>⚡ Engine Status:</b> 🟢 ONLINE & POLLING\n` +
     `<b>🕒 Last Updated:</b> <code>${status.updatedAt}</code>\n\n` +
@@ -444,6 +496,7 @@ loadUsers();
 loadStats();
 loadBookmarks();
 loadPinnedTokens();
+loadTokenStats();
 
 
 // ==================== NOTION HELPERS ====================
@@ -1157,7 +1210,15 @@ async function generateQuestionsWithGemini(topic, exam, subject, count = 10, pas
         if (parsed.questions && parsed.questions.length > 0) {
           console.log(`✅ Success with Gemini model: ${model}`);
           LAST_WORKING_GEMINI_MODEL = model; // Remember this model for next time
-          return parsed.questions;
+
+          const usage = data.usageMetadata || {};
+          const p = usage.promptTokenCount || 0;
+          const c = usage.candidatesTokenCount || 0;
+          const t = usage.totalTokenCount || (p + c);
+          const tokenUsage = { promptTokens: p, completionTokens: c, totalTokens: t };
+
+          recordTokenUsage(`Gemini (${model})`, tokenUsage);
+          return { questions: parsed.questions, tokenUsage };
         }
       }
     } catch (error) {
@@ -1213,7 +1274,15 @@ async function generateQuestionsWithChatGPT(topic, exam, subject, count = 10, pa
         const parsed = JSON.parse(text);
         if (parsed.questions && parsed.questions.length > 0) {
           console.log(`✅ Success with ChatGPT model: ${model}`);
-          return parsed.questions;
+
+          const usage = data.usage || {};
+          const p = usage.prompt_tokens || 0;
+          const c = usage.completion_tokens || 0;
+          const t = usage.total_tokens || (p + c);
+          const tokenUsage = { promptTokens: p, completionTokens: c, totalTokens: t };
+
+          recordTokenUsage(`ChatGPT (${model})`, tokenUsage);
+          return { questions: parsed.questions, modelUsed: `ChatGPT (${model})`, tokenUsage };
         }
       }
     } catch (error) {
@@ -1247,7 +1316,15 @@ async function generateQuestionsWithGroq(topic, exam, subject, count = 10, paste
       const parsed = JSON.parse(text);
       if (parsed.questions && parsed.questions.length > 0) {
         console.log(`✅ Success with Groq model: ${model}`);
-        return { questions: parsed.questions, modelUsed: `Groq (${model})` };
+
+        const usage = response.data.usage || {};
+        const p = usage.prompt_tokens || 0;
+        const c = usage.completion_tokens || 0;
+        const t = usage.total_tokens || (p + c);
+        const tokenUsage = { promptTokens: p, completionTokens: c, totalTokens: t };
+
+        recordTokenUsage(`Groq (${model})`, tokenUsage);
+        return { questions: parsed.questions, modelUsed: `Groq (${model})`, tokenUsage };
       }
     } catch (error) {
       console.warn(`⚠️ Groq model ${model} failed: ${error.response?.data?.error?.message || error.message}`);
@@ -1258,10 +1335,14 @@ async function generateQuestionsWithGroq(topic, exam, subject, count = 10, paste
 
 async function generateQuestions(topic, exam, subject, count = 10, pastedText = null) {
   console.log('Attempting to generate questions using Gemini AI...');
-  let questions = await generateQuestionsWithGemini(topic, exam, subject, count, pastedText);
-  if (questions && questions.length > 0) {
+  let geminiResult = await generateQuestionsWithGemini(topic, exam, subject, count, pastedText);
+  if (geminiResult && geminiResult.questions && geminiResult.questions.length > 0) {
     console.log('✅ Successfully generated questions with Gemini.');
-    return { questions, modelUsed: `Gemini (${LAST_WORKING_GEMINI_MODEL || 'auto'})` };
+    return {
+      questions: geminiResult.questions,
+      modelUsed: `Gemini (${LAST_WORKING_GEMINI_MODEL || 'auto'})`,
+      tokenUsage: geminiResult.tokenUsage
+    };
   }
 
   console.log('⚠️ Gemini failed. Falling back to Groq (Llama)...');
@@ -1272,10 +1353,10 @@ async function generateQuestions(topic, exam, subject, count = 10, pastedText = 
   }
 
   console.log('⚠️ Groq failed. Falling back to ChatGPT...');
-  questions = await generateQuestionsWithChatGPT(topic, exam, subject, count, pastedText);
-  if (questions && questions.length > 0) {
+  const chatGptResult = await generateQuestionsWithChatGPT(topic, exam, subject, count, pastedText);
+  if (chatGptResult) {
     console.log('✅ Successfully generated questions with ChatGPT.');
-    return { questions, modelUsed: 'ChatGPT (gpt-4o-mini)' };
+    return chatGptResult;
   }
 
   console.log('❌ All AI models failed to generate questions.');
@@ -1345,11 +1426,15 @@ async function generateQuestionsWithAnimation(chatId, topic, exam, subject, coun
   }
 
   if (result && result.questions && result.questions.length > 0) {
-    const { questions, modelUsed } = result;
+    const { questions, modelUsed, tokenUsage } = result;
     const modelEmoji = modelUsed.includes('Gemini') ? '🔵' : modelUsed.includes('Groq') ? '🟣' : '🟢';
+    const tokenInfo = tokenUsage && tokenUsage.totalTokens > 0
+      ? `\n🔤 <b>Tokens Used:</b> <code>${tokenUsage.totalTokens.toLocaleString()} tokens</code>`
+      : '';
+
     try {
       await bot.editMessageText(
-        `✨ <b>ExamVault Luminance</b>\n━━━━━━━━━━━━━━━━━━━━\n✅ <b>Manifestation Complete!</b>\n\n${getGlowProgressBar(100)}\n\n<i>Topic: ${topic}</i>\n\n${modelEmoji} <b>AI Model:</b> <code>${escapeHTML(modelUsed)}</code>`,
+        `✨ <b>ExamVault Luminance</b>\n━━━━━━━━━━━━━━━━━━━━\n✅ <b>Manifestation Complete!</b>\n\n${getGlowProgressBar(100)}\n\n<i>Topic: ${topic}</i>\n\n${modelEmoji} <b>AI Model:</b> <code>${escapeHTML(modelUsed)}</code>${tokenInfo}`,
         {
           chat_id: chatId,
           message_id: statusMsg.message_id,
@@ -1364,7 +1449,10 @@ async function generateQuestionsWithAnimation(chatId, topic, exam, subject, coun
       console.error('Background Notion save failed:', e.message);
     });
 
-    return { questions, modelUsed };
+    // Auto-update pinned token status message live
+    updatePinnedTokenStatus(chatId).catch(() => {});
+
+    return { questions, modelUsed, tokenUsage };
   }
 
   // Failure fallback
