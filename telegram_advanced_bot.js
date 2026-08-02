@@ -2284,8 +2284,8 @@ async function generateQuestionsWithGemini(topic, exam, subject, count = 10, pas
       const data = response.data;
       if (data.candidates && data.candidates[0] && data.candidates[0].content) {
         const text = data.candidates[0].content.parts[0].text;
-        const parsed = JSON.parse(text);
-        if (parsed.questions && parsed.questions.length > 0) {
+        const parsed = safeParseJSON(text);
+        if (parsed && parsed.questions && parsed.questions.length > 0) {
           console.log(`✅ Success with Gemini model: ${model}`);
           LAST_WORKING_GEMINI_MODEL = model; // Remember this model for next time
 
@@ -2349,8 +2349,8 @@ async function generateQuestionsWithChatGPT(topic, exam, subject, count = 10, pa
       const data = response.data;
       if (data.choices && data.choices[0] && data.choices[0].message) {
         const text = data.choices[0].message.content;
-        const parsed = JSON.parse(text);
-        if (parsed.questions && parsed.questions.length > 0) {
+        const parsed = safeParseJSON(text);
+        if (parsed && parsed.questions && parsed.questions.length > 0) {
           console.log(`✅ Success with ChatGPT model: ${model}`);
 
           const usage = data.usage || {};
@@ -2391,8 +2391,8 @@ async function generateQuestionsWithGroq(topic, exam, subject, count = 10, paste
         ]
       }, { headers: { 'Authorization': `Bearer ${groqKey}`, 'Content-Type': 'application/json' }, timeout: 60000 });
       const text = response.data.choices[0].message.content;
-      const parsed = JSON.parse(text);
-      if (parsed.questions && parsed.questions.length > 0) {
+      const parsed = safeParseJSON(text);
+      if (parsed && parsed.questions && parsed.questions.length > 0) {
         console.log(`✅ Success with Groq model: ${model}`);
 
         const usage = response.data.usage || {};
