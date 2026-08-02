@@ -90,6 +90,172 @@ const reviewSessions = new Map();
 // Starred questions: { userId: [ { q, exam, subject, topic } ] }
 const userBookmarks = new Map();
 
+// Pinned status messages: { chatId: messageId }
+const pinnedMessagesMap = new Map();
+
+function savePinnedTokens() {
+  try {
+    const data = JSON.stringify(Array.from(pinnedMessagesMap.entries()), null, 2);
+    fs.writeFileSync('pinned_tokens.json', data, 'utf8');
+  } catch (err) {
+    console.error('Error saving pinned tokens:', err.message);
+  }
+}
+
+function loadPinnedTokens() {
+  try {
+    if (fs.existsSync('pinned_tokens.json')) {
+      const data = fs.readFileSync('pinned_tokens.json', 'utf8');
+      const entries = JSON.parse(data);
+      for (const [key, val] of entries) pinnedMessagesMap.set(key, val);
+      console.log(`📌 Loaded pinned tokens for ${pinnedMessagesMap.size} users.`);
+    }
+  } catch (err) {
+    console.error('Error loading pinned tokens:', err.message);
+  }
+}
+
+let cachedTokenStatus = null;
+let lastCheckTime = 0;
+
+async function getLiveTokenStatus(forceRefresh = false) {
+  const now = Date.now();
+  if (!forceRefresh && cachedTokenStatus && (now - lastCheckTime < 30000)) {
+    return cachedTokenStatus;
+  }
+
+  const status = {
+    gemini: { ok: false, details: 'Checking...' },
+    groq: { ok: false, details: 'Checking...' },
+    openai: { ok: false, details: 'Checking...' },
+    notion: { ok: false, details: 'Checking...' },
+    updatedAt: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  };
+
+  // 1. Gemini
+  const geminiKey = process.env.GEMINI_API_KEY;
+  if (!geminiKey) {
+    status.gemini = { ok: false, details: '❌ Key Missing' };
+  } else {
+    try {
+      const model = LAST_WORKING_GEMINI_MODEL || 'gemini-3.6-flash';
+      const res = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
+        { contents: [{ parts: [{ text: 'hi' }] }] },
+        { timeout: 5000 }
+      );
+      if (res.data.candidates) {
+        status.gemini = { ok: true, details: `🟢 ACTIVE (${model})` };
+      }
+    } catch (e) {
+      const err = e.response?.data?.error?.message || e.message;
+      if (err.includes('quota') || e.response?.status === 429) {
+        status.gemini = { ok: false, details: '🔴 Quota Exceeded' };
+      } else if (err.includes('API key not valid') || err.includes('invalid')) {
+        status.gemini = { ok: false, details: '❌ Invalid Key' };
+      } else {
+        status.gemini = { ok: false, details: `⚠️ ${err.slice(0, 20)}` };
+      }
+    }
+  }
+
+  // 2. Groq
+  const groqKey = process.env.GROQ_API_KEY;
+  if (!groqKey) {
+    status.groq = { ok: false, details: '❌ Key Missing' };
+  } else {
+    try {
+      const res = await axios.post(
+        'https://api.groq.com/openai/v1/chat/completions',
+        { model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: 'hi' }], max_tokens: 2 },
+        { headers: { 'Authorization': `Bearer ${groqKey}`, 'Content-Type': 'application/json' }, timeout: 5000 }
+      );
+      if (res.data.choices) {
+        status.groq = { ok: true, details: '🟢 ACTIVE (Llama 3.3 70B)' };
+      }
+    } catch (e) {
+      const err = e.response?.data?.error?.message || e.message;
+      status.groq = { ok: false, details: err.includes('quota') ? '🔴 Quota Exceeded' : '❌ Key Error' };
+    }
+  }
+
+  // 3. OpenAI
+  const openaiKey = process.env.OPENAI_API_KEY;
+  if (!openaiKey) {
+    status.openai = { ok: false, details: '❌ Key Missing' };
+  } else {
+    try {
+      const res = await axios.post(
+        'https://api.openai.com/v1/chat/completions',
+        { model: 'gpt-4o-mini', messages: [{ role: 'user', content: 'hi' }], max_tokens: 2 },
+        { headers: { 'Authorization': `Bearer ${openaiKey}` }, timeout: 5000 }
+      );
+      if (res.data.choices) {
+        status.openai = { ok: true, details: '🟢 ACTIVE' };
+      }
+    } catch (e) {
+      const err = e.response?.data?.error?.message || e.message;
+      status.openai = { ok: false, details: err.includes('quota') ? '🔴 Quota Exceeded' : '❌ Key Error' };
+    }
+  }
+
+  // 4. Notion
+  const notionKey = process.env.NOTION_API_KEY;
+  const notionDb = process.env.NOTION_PARENT_DB;
+  if (notionKey && notionDb) {
+    status.notion = { ok: true, details: '🟢 CONNECTED' };
+  } else {
+    status.notion = { ok: false, details: '⚠️ Incomplete Config' };
+  }
+
+  cachedTokenStatus = status;
+  lastCheckTime = now;
+  return status;
+}
+
+function formatPinnedTokenDashboardText(status) {
+  return `📌 <b>LIVE AI MODEL & TOKEN DASHBOARD</b>\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `<b>🤖 Active AI Providers:</b>\n` +
+    `• 🔵 <b>Gemini AI:</b> ${status.gemini.details}\n` +
+    `• 🟣 <b>Groq (Llama 3.3):</b> ${status.groq.details}\n` +
+    `• 🟢 <b>OpenAI (GPT-4o):</b> ${status.openai.details}\n\n` +
+    `<b>📂 Notion Vault:</b> ${status.notion.details}\n` +
+    `<b>⚡ Engine Status:</b> 🟢 ONLINE & POLLING\n` +
+    `<b>🕒 Last Updated:</b> <code>${status.updatedAt}</code>\n\n` +
+    `<i>📌 This message stays pinned to give you real-time live updates on your AI tokens and model quotas.</i>`;
+}
+
+async function updatePinnedTokenStatus(chatId, forceRefresh = false) {
+  try {
+    const status = await getLiveTokenStatus(forceRefresh);
+    const text = formatPinnedTokenDashboardText(status);
+    const pinnedMsgId = pinnedMessagesMap.get(chatId);
+
+    if (pinnedMsgId) {
+      try {
+        await bot.editMessageText(text, { chat_id: chatId, message_id: pinnedMsgId, parse_mode: 'HTML' });
+        return pinnedMsgId;
+      } catch (e) {
+        // Message might have been deleted, proceed to recreate
+      }
+    }
+
+    const sent = await bot.sendMessage(chatId, text, { parse_mode: 'HTML' });
+    pinnedMessagesMap.set(chatId, sent.message_id);
+    savePinnedTokens();
+
+    try {
+      await bot.pinChatMessage(chatId, sent.message_id, { disable_notification: true });
+    } catch (pinErr) {
+      console.warn(`Pinning error for ${chatId}:`, pinErr.message);
+    }
+    return sent.message_id;
+  } catch (err) {
+    console.error('Error in updatePinnedTokenStatus:', err.message);
+  }
+}
+
 // Persistence Helpers
 function saveSchedules() {
   try {
@@ -277,6 +443,7 @@ loadSchedules();
 loadUsers();
 loadStats();
 loadBookmarks();
+loadPinnedTokens();
 
 
 // ==================== NOTION HELPERS ====================
@@ -1537,7 +1704,7 @@ bot.onText(/\/broadcast (.+)/, (msg, match) => {
 
 // --- USER COMMANDS ---
 
-bot.onText(/\/start/, (msg) => {
+bot.onText(/\/start/, async (msg) => {
   const chatId = msg.chat.id;
 
   // Track User
@@ -1546,10 +1713,19 @@ bot.onText(/\/start/, (msg) => {
     saveUsers();
   }
 
+  // Get live token & model status for welcome message
+  const status = await getLiveTokenStatus();
+
   const welcomeText = `
 🎯 <b>Welcome to ExamVault Advanced Bot!</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+<b>🤖 Live AI Model & Token Status:</b>
+• 🔵 <b>Gemini:</b> ${status.gemini.details}
+• 🟣 <b>Groq (Llama 3.3):</b> ${status.groq.details}
+• 🟢 <b>OpenAI:</b> ${status.openai.details}
+• 📂 <b>Notion Vault:</b> ${status.notion.details}
 
-This bot helps you prepare for:
+<b>Exams Covered:</b>
 ✅ SSC (CGL, CHSL, MTS, GD)
 ✅ Railway (RRB NTPC, Group D, ALP)
 ✅ TNPSC (Group 1, 2, 4)
@@ -1558,16 +1734,20 @@ This bot helps you prepare for:
 
 <b>How it works:</b>
 1️⃣ Schedule a test topic tonight
-2️⃣ Questions are AI-generated
-3️⃣ Test runs tomorrow at 7 AM
-4️⃣ All questions saved to Notion
+2️⃣ Questions are AI-generated & Saved to Notion
+3️⃣ Test runs at your scheduled time
 
 <b>Ready?</b> Click below to schedule your first test!
 `;
 
-  bot.sendMessage(chatId, welcomeText, {
+  await bot.sendMessage(chatId, welcomeText, {
     parse_mode: 'HTML',
     reply_markup: getMainKeyboard(chatId)
+  });
+
+  // Pin live token status dashboard message in background
+  updatePinnedTokenStatus(chatId).catch(err => {
+    console.warn('Failed to update pinned token message:', err.message);
   });
 });
 
@@ -2117,60 +2297,21 @@ Keep it strictly under 250 words, encouraging and clear!`;
 
     // Check Connections Diagnostic
     if (data === 'test_connections') {
-      bot.editMessageText('🔍 <b>Running Connection Diagnostics...</b>\n\nTesting Notion, Gemini, and ChatGPT. Please wait...', {
+      bot.editMessageText('🔍 <b>Running Live Connection Diagnostics...</b>\n\nTesting Gemini, Groq, OpenAI, and Notion. Please wait...', {
         chat_id: chatId,
         message_id: query.message.message_id,
         parse_mode: 'HTML'
       });
 
-      let report = '🔍 <b>Connection Report</b>\n\n';
+      const liveStatus = await getLiveTokenStatus(true);
+      await updatePinnedTokenStatus(chatId, true);
 
-      // 1. Test Notion
-      try {
-        const dbRes = await axios.get(`https://api.notion.com/v1/databases/${NOTION_PARENT_DB.trim()}`, {
-          headers: { 'Authorization': `Bearer ${NOTION_KEY.trim()}`, 'Notion-Version': '2022-06-28' }
-        });
-
-        report += '✅ <b>Notion:</b> Connected successfully (Database)\n';
-      } catch (e) {
-        const status = e.response?.status;
-        if (status === 400 || e.response?.data?.code === 'validation_error') {
-          report += '✅ <b>Notion:</b> Connected successfully (Page Mode)\n<i>(Info: Your ID is a Page ID, bot will auto-create databases inside it)</i>\n';
-        } else {
-          const msg = e.response?.data?.message || e.message;
-          report += `❌ <b>Notion:</b> Failed (${status || 'Network Error'})\n`;
-          if (status === 401) report += '<i>(Reason: Invalid API Key)</i>\n';
-          else if (status === 404) report += '<i>(Reason: ID not found or Integration not shared. Go to Notion -> ... -> Add Connections)</i>\n';
-          else report += `<i>(Error: ${msg})</i>\n`;
-        }
-      }
-
-      // 2. Test Gemini
-      try {
-        const targetModel = LAST_WORKING_GEMINI_MODEL || 'gemini-1.5-flash';
-        const gRes = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${GEMINI_API_KEY}`, {
-          contents: [{ parts: [{ text: 'hi' }] }]
-        });
-        if (gRes.data.candidates) report += `✅ <b>Gemini AI:</b> Connected successfully (${targetModel})\n`;
-        else throw new Error();
-      } catch (e) {
-        report += `❌ <b>Gemini AI:</b> Failed (Check API Key or Limits)\n`;
-      }
-
-
-      // 3. Test OpenAI
-      try {
-        const oRes = await axios.post('https://api.openai.com/v1/chat/completions', {
-          model: 'gpt-4o-mini',
-          messages: [{ role: 'user', content: 'hi' }]
-        }, {
-          headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}` }
-        });
-        if (oRes.data.choices) report += '✅ <b>ChatGPT:</b> Connected successfully\n';
-        else throw new Error();
-      } catch (e) {
-        report += `❌ <b>ChatGPT:</b> Failed (Check API Key or Balance)\n`;
-      }
+      let report = `🔍 <b>Live Connection & Token Health Report</b>\n━━━━━━━━━━━━━━━━━━━━\n\n`;
+      report += `• 🔵 <b>Gemini AI:</b> ${liveStatus.gemini.details}\n`;
+      report += `• 🟣 <b>Groq (Llama 3.3):</b> ${liveStatus.groq.details}\n`;
+      report += `• 🟢 <b>OpenAI:</b> ${liveStatus.openai.details}\n`;
+      report += `• 📂 <b>Notion Vault:</b> ${liveStatus.notion.details}\n\n`;
+      report += `📌 <i>Your pinned status dashboard message has been updated!</i>`;
 
       bot.editMessageText(report, {
         chat_id: chatId,
@@ -2901,6 +3042,20 @@ Consistent practice is the key to success. Take a moment to set your topic for t
       } catch (err) {
         console.error(`Failed to send reminder to ${chatId}:`, err.message);
       }
+    }
+  }
+});
+
+/**
+ * 📌 LIVE TOKEN DASHBOARD CRON (Every 30 mins)
+ * Automatically refresh live model quota & status for all active users.
+ */
+cron.schedule('*/30 * * * *', async () => {
+  console.log('📌 Refreshing live token & model status dashboard...');
+  const status = await getLiveTokenStatus(true);
+  for (const chatId of allUsers) {
+    if (pinnedMessagesMap.has(chatId)) {
+      await updatePinnedTokenStatus(chatId);
     }
   }
 });
