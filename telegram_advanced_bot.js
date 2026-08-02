@@ -90,6 +90,21 @@ const reviewSessions = new Map();
 // Starred questions: { userId: [ { q, exam, subject, topic } ] }
 const userBookmarks = new Map();
 
+// Target Exam Dates for Countdown Dashboard: { userId: { exam, targetDate, dailyTarget } }
+const userExamDates = new Map();
+
+// Saved Flashcards: { userId: [ { term, definition, subject, exam, box, lastReviewed } ] }
+const userFlashcards = new Map();
+
+// Active AI Tutor Sessions: { chatId: { active: true, startTime: number } }
+const activeTutorSessions = new Map();
+
+// Active Mock / PYQ Exams: { chatId: { title, questions, current, userAnswers: [], startTime, exam, isPyq } }
+const activeMockExams = new Map();
+
+// Active Flashcard Review Sessions: { chatId: { cards: [], current: 0, showingAnswer: boolean } }
+const activeFlashcardSessions = new Map();
+
 // Pinned status messages: { chatId: messageId }
 const pinnedMessagesMap = new Map();
 
@@ -486,6 +501,50 @@ function loadBookmarks() {
   }
 }
 
+function saveExamDates() {
+  try {
+    const data = JSON.stringify(Array.from(userExamDates.entries()), null, 2);
+    fs.writeFileSync('exam_dates.json', data, 'utf8');
+  } catch (err) {
+    console.error('Error saving exam dates:', err.message);
+  }
+}
+
+function loadExamDates() {
+  try {
+    if (fs.existsSync('exam_dates.json')) {
+      const data = fs.readFileSync('exam_dates.json', 'utf8');
+      const entries = JSON.parse(data);
+      for (const [key, val] of entries) userExamDates.set(key, val);
+      console.log(`📅 Loaded target exam dates for ${userExamDates.size} users.`);
+    }
+  } catch (err) {
+    console.error('Error loading exam dates:', err.message);
+  }
+}
+
+function saveFlashcards() {
+  try {
+    const data = JSON.stringify(Array.from(userFlashcards.entries()), null, 2);
+    fs.writeFileSync('flashcards.json', data, 'utf8');
+  } catch (err) {
+    console.error('Error saving flashcards:', err.message);
+  }
+}
+
+function loadFlashcards() {
+  try {
+    if (fs.existsSync('flashcards.json')) {
+      const data = fs.readFileSync('flashcards.json', 'utf8');
+      const entries = JSON.parse(data);
+      for (const [key, val] of entries) userFlashcards.set(key, val);
+      console.log(`🗃️ Loaded flashcards for ${userFlashcards.size} users.`);
+    }
+  } catch (err) {
+    console.error('Error loading flashcards:', err.message);
+  }
+}
+
 function recordQuizStats(chatId, exam, subject, score, total) {
   const existing = userStats.get(chatId) || {
     totalTests: 0, totalQuestions: 0, totalCorrect: 0, streak: 0,
@@ -576,6 +635,8 @@ loadStats();
 loadBookmarks();
 loadPinnedTokens();
 loadTokenStats();
+loadExamDates();
+loadFlashcards();
 
 
 // ==================== NOTION HELPERS ====================
@@ -1754,12 +1815,28 @@ function getMainKeyboard(chatId) {
       { text: '⚡ Quick Practice', callback_data: 'quick_practice' }
     ],
     [
-      { text: '📈 My Stats', callback_data: 'view_stats' },
-      { text: '⚙️ Settings', callback_data: 'settings' }
+      { text: '🏆 Full Mock Exam', callback_data: 'mock_exam_menu' },
+      { text: '📑 PYQ Simulator', callback_data: 'pyq_menu' }
+    ],
+    [
+      { text: '🤖 AI Tutor', callback_data: 'ai_tutor_start' },
+      { text: '🗃️ Flashcards', callback_data: 'flashcards_menu' }
+    ],
+    [
+      { text: '🗺️ AI Syllabus', callback_data: 'syllabus_menu' },
+      { text: '📰 Current Affairs', callback_data: 'current_affairs_start' }
+    ],
+    [
+      { text: '📆 Exam Countdown', callback_data: 'countdown_menu' },
+      { text: '🌐 Web Dashboard', callback_data: 'web_dashboard_info' }
     ],
     [
       { text: '🏋️ Practice Weak Area', callback_data: 'practice_weak' },
       { text: '🔖 My Bookmarks', callback_data: 'view_bookmarks' }
+    ],
+    [
+      { text: '📈 My Stats', callback_data: 'view_stats' },
+      { text: '⚙️ Settings', callback_data: 'settings' }
     ],
     [
       { text: '🔢 Live Token Count', callback_data: 'live_token_count' },
@@ -1907,6 +1984,470 @@ function getSubjectKeyboard(exam) {
     keyboard.push(row);
   }
   return { inline_keyboard: keyboard };
+}
+
+// ==================== FEATURE HELPER FUNCTIONS ====================
+
+// --- AI TUTOR HELPER ---
+async function handleTutorQuery(chatId, queryText) {
+  const statusMsg = await bot.sendMessage(chatId, '🧠 <b>ExamVault AI Tutor is typing...</b>', { parse_mode: 'HTML' });
+
+  try {
+    const prompt = `You are ExamVault AI Tutor, an elite 24/7 exam preparation assistant for Indian competitive exams (SSC, RRB NTPC, TNPSC, IBPS/SBI Bank, RRB/SSC JE).
+The student asks: "${queryText}"
+
+Provide a clear, highly educational response.
+STRICT FORMATTING RULE: Use ONLY basic HTML tags (<b>bold</b>, <i>italic</i>, <code>code</code>). DO NOT use markdown like ** or ## or *.
+Structure:
+1. Direct Explanation & Answer
+2. 💡 ELI5 (Explain Like I'm 5 simple analogy)
+3. ⚡ Pro-Tip / Mnemonic / Shortcut formula (if applicable)
+Keep response concise, engaging, and under 300 words.`;
+
+    const model = LAST_WORKING_GEMINI_MODEL || 'gemini-1.5-flash';
+    let replyText = '';
+
+    try {
+      const res = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
+        { contents: [{ parts: [{ text: prompt }] }] },
+        { timeout: 30000 }
+      );
+      replyText = res.data.candidates[0].content.parts[0].text;
+    } catch (e) {
+      const groqKey = process.env.GROQ_API_KEY;
+      if (groqKey) {
+        const groqRes = await axios.post(
+          'https://api.groq.com/openai/v1/chat/completions',
+          { model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: prompt }] },
+          { headers: { 'Authorization': `Bearer ${groqKey}`, 'Content-Type': 'application/json' }, timeout: 20000 }
+        );
+        replyText = groqRes.data.choices[0].message.content;
+      } else {
+        throw e;
+      }
+    }
+
+    let cleaned = escapeHTML(replyText)
+      .replace(/&lt;b&gt;(.*?)&lt;\/b&gt;/g, '<b>$1</b>')
+      .replace(/&lt;i&gt;(.*?)&lt;\/i&gt;/g, '<i>$1</i>')
+      .replace(/&lt;code&gt;(.*?)&lt;\/code&gt;/g, '<code>$1</code>')
+      .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
+      .replace(/\*(.*?)\*/g, '<i>$1</i>');
+
+    const keyboard = {
+      inline_keyboard: [
+        [{ text: '🚪 Exit Tutor Mode', callback_data: 'exit_tutor' }]
+      ]
+    };
+
+    bot.editMessageText(`🤖 <b>AI Tutor Reply:</b>\n\n${cleaned}`, {
+      chat_id: chatId,
+      message_id: statusMsg.message_id,
+      parse_mode: 'HTML',
+      reply_markup: keyboard
+    }).catch(() => {
+      bot.sendMessage(chatId, `🤖 <b>AI Tutor Reply:</b>\n\n${cleaned}`, { parse_mode: 'HTML', reply_markup: keyboard });
+    });
+
+  } catch (err) {
+    console.error('Tutor Error:', err.message);
+    bot.editMessageText(`⚠️ <b>AI Tutor Error:</b> ${escapeHTML(err.message)}`, {
+      chat_id: chatId,
+      message_id: statusMsg.message_id,
+      parse_mode: 'HTML',
+      reply_markup: { inline_keyboard: [[{ text: '🚪 Exit Tutor Mode', callback_data: 'exit_tutor' }]] }
+    });
+  }
+}
+
+// --- AI SYLLABUS MAPPER HELPER ---
+function showSyllabusMap(chatId, exam, messageId = null) {
+  const subjects = EXAM_SUBJECTS[exam] || [];
+  const stats = userStats.get(chatId) || { byExam: {} };
+  const examStats = stats.byExam[exam] || { correct: 0, total: 0, bySubject: {} };
+
+  let totalQsAnsweredInExam = examStats.total || 0;
+  let overallExamAcc = examStats.total > 0 ? Math.round((examStats.correct / examStats.total) * 100) : 0;
+
+  let text = `🗺️ <b>AI Syllabus & Coverage Mapper: ${exam}</b>\n`;
+  text += `━━━━━━━━━━━━━━━━━━━━\n`;
+  text += `📊 <b>Exam Progress:</b> ${totalQsAnsweredInExam} Questions Practiced (${overallExamAcc}% Accuracy)\n\n`;
+
+  text += `📚 <b>Subject Breakdown & Topic Gap Analysis:</b>\n`;
+
+  let unpracticed = [];
+
+  subjects.forEach(subj => {
+    const subjData = examStats.bySubject ? examStats.bySubject[subj] : null;
+    const total = subjData ? subjData.total : 0;
+    const correct = subjData ? subjData.correct : 0;
+    const acc = total > 0 ? Math.round((correct / total) * 100) : 0;
+
+    let bar = '';
+    if (total === 0) {
+      bar = '░░░░░░░░░░ 0%';
+      unpracticed.push(subj);
+    } else if (total < 10) {
+      bar = '███░░░░░░░ Low Practice';
+    } else if (acc >= 75) {
+      bar = '██████████ ' + acc + '% [MASTERED 🌟]';
+    } else if (acc >= 50) {
+      bar = '██████░░░░ ' + acc + '% [GOOD 👍]';
+    } else {
+      bar = '███░░░░░░░ ' + acc + '% [NEEDS FOCUS ⚠️]';
+    }
+
+    text += `\n• <b>${escapeHTML(subj)}</b>\n  <code>${bar}</code> (${total} Qs)\n`;
+  });
+
+  if (unpracticed.length > 0) {
+    text += `\n💡 <b>Recommended Gaps to Cover Next:</b>\n`;
+    unpracticed.slice(0, 3).forEach(s => {
+      text += `👉 <i>${escapeHTML(s)}</i>\n`;
+    });
+  }
+
+  const keyboard = {
+    inline_keyboard: [
+      [{ text: '⚡ Practice Gap Subject Now', callback_data: `qp_exam_${exam}` }],
+      [{ text: '🔙 Back to Main Menu', callback_data: 'main_menu' }]
+    ]
+  };
+
+  if (messageId) {
+    bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML', reply_markup: keyboard }).catch(() => {});
+  } else {
+    bot.sendMessage(chatId, text, { parse_mode: 'HTML', reply_markup: keyboard });
+  }
+}
+
+// --- FLASHCARD HELPER ---
+function showFlashcardMenu(chatId, messageId = null) {
+  const cards = userFlashcards.get(chatId) || [];
+  const text = `🗃️ <b>Formula & Fact Flashcard Mode</b>\n━━━━━━━━━━━━━━━━━━━━\n` +
+    `Saved Flashcards in Vault: <b>${cards.length}</b>\n\n` +
+    `Select an option below to generate new AI flashcards or review your collection:`;
+
+  const keyboard = {
+    inline_keyboard: [
+      [{ text: '⚡ Generate New AI Flashcards', callback_data: 'gen_flashcards_select' }],
+      cards.length > 0 ? [{ text: `📖 Review Saved Flashcards (${cards.length})`, callback_data: 'review_flashcards' }] : [],
+      [{ text: '🔙 Main Menu', callback_data: 'main_menu' }]
+    ].filter(r => r.length > 0)
+  };
+
+  if (messageId) {
+    bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML', reply_markup: keyboard }).catch(() => {});
+  } else {
+    bot.sendMessage(chatId, text, { parse_mode: 'HTML', reply_markup: keyboard });
+  }
+}
+
+async function generateFlashcards(chatId, exam, subject, messageId = null) {
+  const statusText = `🗃️ <b>Generating AI Flashcards...</b>\n\nSubject: <b>${subject} (${exam})</b>\nCreating key formulas, definitions, and facts...`;
+  if (messageId) {
+    bot.editMessageText(statusText, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML' }).catch(() => {});
+  } else {
+    bot.sendMessage(chatId, statusText, { parse_mode: 'HTML' });
+  }
+
+  const prompt = `Generate 5 high-yield revision flashcards for ${exam} exam on ${subject}.
+Output JSON ONLY with format:
+{
+  "flashcards": [
+    {
+      "term": "Concept/Formula Name or Question",
+      "definition": "Clear concise formula, rule, or explanation (under 50 words)"
+    }
+  ]
+}`;
+
+  try {
+    const model = LAST_WORKING_GEMINI_MODEL || 'gemini-1.5-flash';
+    const res = await axios.post(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
+      { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: 'application/json' } },
+      { timeout: 30000 }
+    );
+
+    const parsed = JSON.parse(res.data.candidates[0].content.parts[0].text);
+    const newCards = parsed.flashcards || [];
+
+    const existing = userFlashcards.get(chatId) || [];
+    newCards.forEach(c => {
+      existing.push({ term: c.term, definition: c.definition, subject, exam, box: 1, lastReviewed: new Date().toISOString() });
+    });
+    userFlashcards.set(chatId, existing);
+    saveFlashcards();
+
+    activeFlashcardSessions.set(chatId, { cards: newCards, current: 0, showingAnswer: false });
+    renderFlashcard(chatId);
+
+  } catch (err) {
+    console.error('Flashcard Generation Error:', err.message);
+    bot.sendMessage(chatId, `❌ Failed to generate flashcards: ${escapeHTML(err.message)}`, { reply_markup: getMainKeyboard(chatId) });
+  }
+}
+
+function renderFlashcard(chatId, messageId = null) {
+  const session = activeFlashcardSessions.get(chatId);
+  if (!session || !session.cards || session.cards.length === 0) return;
+
+  const card = session.cards[session.current];
+  const total = session.cards.length;
+
+  let text = `🗃️ <b>Flashcard ${session.current + 1}/${total}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+  if (!session.showingAnswer) {
+    text += `❓ <b>QUESTION / CONCEPT:</b>\n\n<b>${escapeHTML(card.term)}</b>\n\n<i>Tap below to reveal formula/answer...</i>`;
+  } else {
+    text += `❓ <b>CONCEPT:</b>\n<b>${escapeHTML(card.term)}</b>\n\n💡 <b>FORMULA / EXPLANATION:</b>\n${escapeHTML(card.definition)}`;
+  }
+
+  const keyboard = { inline_keyboard: [] };
+
+  if (!session.showingAnswer) {
+    keyboard.inline_keyboard.push([{ text: '👁️ Reveal Answer', callback_data: 'fc_reveal' }]);
+  } else {
+    keyboard.inline_keyboard.push([
+      { text: '✅ Know It', callback_data: 'fc_know' },
+      { text: '🔄 Review Again', callback_data: 'fc_again' }
+    ]);
+  }
+
+  keyboard.inline_keyboard.push([{ text: '🏠 Main Menu', callback_data: 'main_menu' }]);
+
+  if (messageId) {
+    bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML', reply_markup: keyboard }).catch(() => {});
+  } else {
+    bot.sendMessage(chatId, text, { parse_mode: 'HTML', reply_markup: keyboard });
+  }
+}
+
+// --- EXAM COUNTDOWN DASHBOARD HELPER ---
+function showCountdownDashboard(chatId, messageId = null) {
+  const entry = userExamDates.get(chatId);
+
+  if (!entry) {
+    const text = `📆 <b>Exam Countdown Dashboard</b>\n━━━━━━━━━━━━━━━━━━━━\n` +
+      `No target exam date set yet.\n\nSetting a target exam date helps you track remaining days and calculates your recommended daily question quota!`;
+
+    const keyboard = {
+      inline_keyboard: [
+        [{ text: '🎯 Set My Exam Target Date', callback_data: 'set_countdown_exam' }],
+        [{ text: '🔙 Main Menu', callback_data: 'main_menu' }]
+      ]
+    };
+
+    if (messageId) {
+      bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML', reply_markup: keyboard }).catch(() => {});
+    } else {
+      bot.sendMessage(chatId, text, { parse_mode: 'HTML', reply_markup: keyboard });
+    }
+    return;
+  }
+
+  const targetDate = new Date(entry.targetDate);
+  const now = new Date();
+  const diffTime = targetDate - now;
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+  const stats = userStats.get(chatId);
+  const totalDone = stats ? stats.totalQuestions : 0;
+  const remainingQuestions = Math.max(0, 1000 - totalDone);
+  const dailyTarget = diffDays > 0 ? Math.ceil(remainingQuestions / diffDays) : 0;
+
+  let daysEmoji = diffDays <= 10 ? '🚨' : diffDays <= 30 ? '⏳' : '🗓️';
+
+  let text = `📆 <b>Exam Countdown Dashboard</b>\n━━━━━━━━━━━━━━━━━━━━\n` +
+    `🏛️ <b>Target Exam:</b> ${escapeHTML(entry.exam)}\n` +
+    `🎯 <b>Exam Date:</b> <code>${targetDate.toDateString()}</code>\n` +
+    `${daysEmoji} <b>Days Remaining:</b> <b>${diffDays > 0 ? diffDays : 0} Days</b>\n\n` +
+    `📊 <b>Syllabus Target Progress:</b>\n` +
+    `• Questions Practiced: <code>${totalDone} / 1000</code>\n` +
+    `• Target Remaining:    <code>${remainingQuestions} Qs</code>\n` +
+    `• Recommended Quota:   <b><code>${dailyTarget} Qs / day</code></b>\n\n` +
+    `<i>Stay consistent every day to beat your target!</i>`;
+
+  const keyboard = {
+    inline_keyboard: [
+      [{ text: '✏️ Update Exam Date', callback_data: 'set_countdown_exam' }],
+      [{ text: '🎯 Take Recommended Daily Quiz (' + (dailyTarget || 10) + ' Qs)', callback_data: `take_countdown_quiz_${dailyTarget || 10}_${entry.exam}` }],
+      [{ text: '🔙 Main Menu', callback_data: 'main_menu' }]
+    ]
+  };
+
+  if (messageId) {
+    bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML', reply_markup: keyboard }).catch(() => {});
+  } else {
+    bot.sendMessage(chatId, text, { parse_mode: 'HTML', reply_markup: keyboard });
+  }
+}
+
+// --- MOCK EXAM & PYQ SIMULATOR HELPERS ---
+function showMockExamMenu(chatId, messageId = null) {
+  const text = `🏆 <b>Full-Length Timed Mock Exam Mode</b>\n━━━━━━━━━━━━━━━━━━━━\n` +
+    `Simulates real official exam conditions:\n` +
+    `• ⏱️ Timed Session\n` +
+    `• 🔒 Instant answer feedback is HIDDEN\n` +
+    `• 📈 Final Scorecard & Detailed Breakdown at the end!\n\n` +
+    `Select your Exam:`;
+
+  const keyboard = {
+    inline_keyboard: [
+      [{ text: '🎖️ SSC CGL Mock (25 Qs)', callback_data: 'start_mock_SSC_25' }],
+      [{ text: '🚂 RRB NTPC Mock (30 Qs)', callback_data: 'start_mock_RRB_30' }],
+      [{ text: '🏛️ TNPSC Prelims Mock (30 Qs)', callback_data: 'start_mock_TNPSC_30' }],
+      [{ text: '🏦 Bank Prelims Mock (35 Qs)', callback_data: 'start_mock_Bank_35' }],
+      [{ text: '⚙️ JE Technical Mock (30 Qs)', callback_data: 'start_mock_JE_30' }],
+      [{ text: '🔙 Main Menu', callback_data: 'main_menu' }]
+    ]
+  };
+
+  if (messageId) {
+    bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML', reply_markup: keyboard }).catch(() => {});
+  } else {
+    bot.sendMessage(chatId, text, { parse_mode: 'HTML', reply_markup: keyboard });
+  }
+}
+
+function showPyqMenu(chatId, messageId = null) {
+  const text = `📑 <b>Official Previous Year Question (PYQ) Simulator</b>\n━━━━━━━━━━━━━━━━━━━━\n` +
+    `Practice actual official question papers from 2020-2025!\n\nSelect a PYQ Paper:`;
+
+  const keyboard = {
+    inline_keyboard: [
+      [{ text: '🎖️ SSC CGL 2023 Official PYQ', callback_data: 'start_pyq_SSC_2023' }],
+      [{ text: '🚂 RRB NTPC 2021 Official PYQ', callback_data: 'start_pyq_RRB_2021' }],
+      [{ text: '🏛️ TNPSC Group 4 2022 PYQ', callback_data: 'start_pyq_TNPSC_2022' }],
+      [{ text: '🏦 IBPS PO 2023 Official PYQ', callback_data: 'start_pyq_Bank_2023' }],
+      [{ text: '⚙️ RRB JE 2019 Official PYQ', callback_data: 'start_pyq_JE_2019' }],
+      [{ text: '🔙 Main Menu', callback_data: 'main_menu' }]
+    ]
+  };
+
+  if (messageId) {
+    bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML', reply_markup: keyboard }).catch(() => {});
+  } else {
+    bot.sendMessage(chatId, text, { parse_mode: 'HTML', reply_markup: keyboard });
+  }
+}
+
+async function startMockOrPyqSession(chatId, exam, count, title, isPyq = false) {
+  bot.sendMessage(chatId, `🚀 <b>Preparing ${title}...</b>\nGenerating ${count} exam-standard questions. Please wait...`, { parse_mode: 'HTML' });
+
+  const result = await generateQuestionsWithAnimation(chatId, title, exam, 'Full Exam', count);
+  if (!result) return;
+
+  const { questions, modelUsed } = result;
+
+  activeMockExams.set(chatId, {
+    title,
+    exam,
+    questions,
+    current: 0,
+    userAnswers: [],
+    startTime: Date.now(),
+    modelUsed,
+    isPyq
+  });
+
+  renderMockQuestion(chatId);
+}
+
+function renderMockQuestion(chatId, messageId = null) {
+  const session = activeMockExams.get(chatId);
+  if (!session) return;
+
+  const q = session.questions[session.current];
+  const total = session.questions.length;
+  const elapsedSec = Math.round((Date.now() - session.startTime) / 1000);
+  const min = Math.floor(elapsedSec / 60);
+  const sec = elapsedSec % 60;
+  const timeStr = `${min}m ${sec}s`;
+
+  const text = `🏆 <b>${escapeHTML(session.title)}</b>\n━━━━━━━━━━━━━━━━━━━━\n` +
+    `⏱️ <b>Elapsed Time:</b> <code>${timeStr}</code>\n` +
+    `❓ <b>Question ${session.current + 1}/${total}</b>\n\n` +
+    `<b>${escapeHTML(q.question)}</b>\n\n` +
+    `<b>A)</b> ${escapeHTML(q.optionA)}\n` +
+    `<b>B)</b> ${escapeHTML(q.optionB)}\n` +
+    `<b>C)</b> ${escapeHTML(q.optionC)}\n` +
+    `<b>D)</b> ${escapeHTML(q.optionD)}\n\n` +
+    `<i>Select your choice (Answers remain hidden until test end):</i>`;
+
+  const keyboard = {
+    inline_keyboard: [
+      [
+        { text: '🔵 A', callback_data: 'mock_ans_A' },
+        { text: '🟣 B', callback_data: 'mock_ans_B' }
+      ],
+      [
+        { text: '🟡 C', callback_data: 'mock_ans_C' },
+        { text: '🔴 D', callback_data: 'mock_ans_D' }
+      ],
+      [{ text: '⏭️ Skip Question', callback_data: 'mock_ans_SKIP' }]
+    ]
+  };
+
+  if (messageId) {
+    bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML', reply_markup: keyboard }).catch(() => {});
+  } else {
+    bot.sendMessage(chatId, text, { parse_mode: 'HTML', reply_markup: keyboard });
+  }
+}
+
+function finishMockExam(chatId, messageId) {
+  const session = activeMockExams.get(chatId);
+  if (!session) return;
+
+  const totalSec = Math.round((Date.now() - session.startTime) / 1000);
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+
+  let correctCount = 0;
+  let wrongAnswers = [];
+
+  session.questions.forEach((q, idx) => {
+    const userAns = session.userAnswers[idx];
+    if (userAns === q.correctAnswer) {
+      correctCount++;
+    } else {
+      wrongAnswers.push({ q, userAnswer: userAns || 'Skipped' });
+    }
+  });
+
+  const total = session.questions.length;
+  const pct = Math.round((correctCount / total) * 100);
+  const grade = pct >= 80 ? '🏆 Master Class Pass!' : pct >= 60 ? '🎉 Good Score!' : '💪 Keep Practicing!';
+
+  recordQuizStats(chatId, session.exam, 'Full Mock Exam', correctCount, total);
+
+  let text = `🏁 <b>${escapeHTML(session.title)} — FINAL SCORECARD</b>\n` +
+    `━━━━━━━━━━━━━━━━━━━━\n` +
+    `🏆 <b>Score:</b> ${correctCount} / ${total}\n` +
+    `📊 <b>Accuracy:</b> ${pct}%\n` +
+    `⏱️ <b>Total Time Taken:</b> ${min}m ${sec}s\n` +
+    `⚡ <b>Avg Speed:</b> ${Math.round(totalSec / total)}s / question\n\n` +
+    `🎯 <b>Exam Grade:</b> ${grade}\n` +
+    `🤖 <b>AI Generator:</b> <code>${escapeHTML(session.modelUsed)}</code>\n\n` +
+    `<i>All questions synced to your Notion Vault!</i>`;
+
+  const keyboard = {
+    inline_keyboard: [
+      wrongAnswers.length > 0 ? [{ text: `🔁 Review ${wrongAnswers.length} Wrong / Skipped Answers`, callback_data: 'review_wrong' }] : [],
+      [{ text: '📈 View My Stats', callback_data: 'view_stats' }],
+      [{ text: '🏠 Main Menu', callback_data: 'main_menu' }]
+    ].filter(r => r.length > 0)
+  };
+
+  if (wrongAnswers.length > 0) {
+    reviewSessions.set(chatId, { wrong: wrongAnswers, current: 0 });
+  }
+
+  bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML', reply_markup: keyboard }).catch(() => {});
+  activeMockExams.delete(chatId);
 }
 
 // ==================== COMMAND HANDLERS ====================
@@ -2108,13 +2649,165 @@ bot.onText(/\/tokens/, async (msg) => {
   bot.sendMessage(chatId, text, { parse_mode: 'HTML', reply_markup: keyboard });
 });
 
+// --- NEW FEATURE COMMAND HANDLERS ---
+
+// Feature 39: AI Tutor Mode
+bot.onText(/\/tutor(?:\s+(.+))?/, async (msg, match) => {
+  const chatId = msg.chat.id;
+  const initialQuery = match[1] ? match[1].trim() : null;
+
+  activeTutorSessions.set(chatId, { active: true, startTime: Date.now() });
+
+  let text = `🤖 <b>ExamVault AI Tutor Mode Activated!</b>\n━━━━━━━━━━━━━━━━━━━━\nI am your dedicated 24/7 AI tutor for <b>SSC, RRB, TNPSC, Banking & JE Exams</b>.\n\nAsk me anything! Concepts, math problems, shortcuts, history dates, or doubts.\n\n💡 <i>Type <code>/exit</code> or tap below anytime to leave Tutor Mode.</i>`;
+
+  const keyboard = {
+    inline_keyboard: [[{ text: '🚪 Exit Tutor Mode', callback_data: 'exit_tutor' }]]
+  };
+
+  await bot.sendMessage(chatId, text, { parse_mode: 'HTML', reply_markup: keyboard });
+
+  if (initialQuery) {
+    handleTutorQuery(chatId, initialQuery);
+  }
+});
+
+bot.onText(/\/exit/, (msg) => {
+  const chatId = msg.chat.id;
+  if (activeTutorSessions.has(chatId)) {
+    activeTutorSessions.delete(chatId);
+    bot.sendMessage(chatId, '🚪 <b>Exited AI Tutor Mode.</b> Back to Main Menu!', { parse_mode: 'HTML', reply_markup: getMainKeyboard(chatId) });
+  }
+});
+
+// Feature 16: AI Syllabus Mapper
+bot.onText(/\/syllabus(?:\s+(.+))?/, async (msg, match) => {
+  const chatId = msg.chat.id;
+  const examArg = match[1] ? match[1].trim().toUpperCase() : null;
+
+  if (!examArg || !['SSC', 'RRB', 'TNPSC', 'BANK', 'JE'].includes(examArg)) {
+    return bot.sendMessage(chatId, `🗺️ <b>AI Syllabus Mapper</b>\n━━━━━━━━━━━━━━━━━━━━\nPlease select an exam to map your syllabus coverage:`, {
+      parse_mode: 'HTML',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🎖️ SSC', callback_data: 'syl_SSC' }, { text: '🚂 RRB', callback_data: 'syl_RRB' }],
+          [{ text: '🏛️ TNPSC', callback_data: 'syl_TNPSC' }, { text: '🏦 Bank', callback_data: 'syl_Bank' }],
+          [{ text: '⚙️ JE', callback_data: 'syl_JE' }],
+          [{ text: '🔙 Main Menu', callback_data: 'main_menu' }]
+        ]
+      }
+    });
+  }
+
+  showSyllabusMap(chatId, examArg);
+});
+
+// Feature 17: Daily Current Affairs Digest
+bot.onText(/\/currentaffairs/, async (msg) => {
+  const chatId = msg.chat.id;
+  bot.sendMessage(chatId, '📰 <b>Generating Today\'s High-Yield Current Affairs Digest (2025-2026)...</b>', { parse_mode: 'HTML' });
+
+  const result = await generateQuestionsWithAnimation(chatId, 'Current Affairs 2025-2026', 'SSC', 'Current Affairs', 5);
+  if (!result) return;
+
+  const { questions, modelUsed } = result;
+  activeQuizzes.set(chatId, {
+    questions, current: 0, score: 0,
+    topic: 'Current Affairs 2025-2026', subject: 'Current Affairs', exam: 'SSC', modelUsed, wrongAnswers: [],
+    questionStartTime: Date.now(), totalTime: 0
+  });
+
+  bot.sendMessage(chatId, formatQuestion(questions[0], 1, questions.length), {
+    parse_mode: 'HTML', reply_markup: getAnswerKeyboard()
+  });
+});
+
+// Feature 23: Formula & Fact Flashcard Mode
+bot.onText(/\/flashcard/, async (msg) => {
+  const chatId = msg.chat.id;
+  showFlashcardMenu(chatId);
+});
+
+// Feature 34: Exam Countdown Dashboard
+bot.onText(/\/countdown/, async (msg) => {
+  const chatId = msg.chat.id;
+  showCountdownDashboard(chatId);
+});
+
+// Feature 5 & 27: Mock Full Exam & PYQ Simulator
+bot.onText(/\/mock/, (msg) => {
+  const chatId = msg.chat.id;
+  showMockExamMenu(chatId);
+});
+
+bot.onText(/\/pyq/, (msg) => {
+  const chatId = msg.chat.id;
+  showPyqMenu(chatId);
+});
+
+bot.onText(/\/help/, (msg) => {
+  const chatId = msg.chat.id;
+  const helpText = `
+🎯 <b>ExamVault Bot Command Reference</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+<b>📚 Practice & Exams:</b>
+• <code>/schedule</code> — Schedule a test for tonight / 7 AM
+• <code>/mock</code> — Start a full-length timed mock exam
+• <code>/pyq</code> — Practice official Previous Year Question papers
+• <code>/currentaffairs</code> — Instant 5 Current Affairs 2025-2026 MCQs
+• <code>/flashcard</code> — Formula & key fact revision cards
+
+<b>🧠 AI Learning Tools:</b>
+• <code>/tutor [query]</code> — Enter interactive 24/7 AI tutor mode
+• <code>/exit</code> — Leave AI Tutor mode
+• <code>/syllabus [exam]</code> — Map your syllabus coverage & topic gaps
+
+<b>📊 Analytics & Tracking:</b>
+• <code>/countdown</code> — Target exam date countdown & daily question target
+• <code>/stats</code> — Performance dashboard & accuracy breakdown
+• <code>/tokens</code> — Live AI token count & quota dashboard
+
+<b>⚙️ Settings & System:</b>
+• <code>/start</code> — Main Menu & system status
+• <code>/help</code> — This reference guide
+`;
+  bot.sendMessage(chatId, helpText, { parse_mode: 'HTML', reply_markup: getMainKeyboard(chatId) });
+});
+
 // Global input listener
 bot.on('message', async (msg) => {
   if (!msg.text) return;
   const chatId = msg.chat.id;
-  const input = topicInput.get(chatId);
 
+  // Intercept AI Tutor queries if user is in active tutor mode
+  if (activeTutorSessions.has(chatId) && !msg.text.startsWith('/')) {
+    handleTutorQuery(chatId, msg.text.trim());
+    return;
+  }
+
+  const input = topicInput.get(chatId);
   if (!input) return;
+
+  // Handle countdown target date input
+  if (input.step === 'set_countdown_date') {
+    const dateStr = msg.text.trim();
+    const parsedDate = new Date(dateStr);
+
+    if (isNaN(parsedDate.getTime()) || parsedDate <= new Date()) {
+      bot.sendMessage(chatId, '❌ <b>Invalid Date.</b> Please enter a future date in format <code>YYYY-MM-DD</code> (e.g., <code>2026-10-15</code>):', { parse_mode: 'HTML' });
+      return;
+    }
+
+    userExamDates.set(chatId, {
+      exam: input.exam || 'SSC',
+      targetDate: parsedDate.toISOString()
+    });
+    saveExamDates();
+    topicInput.delete(chatId);
+
+    bot.sendMessage(chatId, `✅ <b>Target Exam Date Saved!</b>`, { parse_mode: 'HTML' });
+    showCountdownDashboard(chatId);
+    return;
+  }
 
   if (input.step === 'update_gemini_key') {
     const tempKey = msg.text.trim();
@@ -3304,6 +3997,271 @@ Status: <b>${schedule.status.toUpperCase()}</b>
     }
 
 
+    // ==================== NEW FEATURE CALLBACKS ====================
+
+    // AI Tutor Callbacks
+    if (data === 'ai_tutor_start') {
+      activeTutorSessions.set(chatId, { active: true, startTime: Date.now() });
+      const text = `🤖 <b>ExamVault AI Tutor Mode Activated!</b>\n━━━━━━━━━━━━━━━━━━━━\nI am your dedicated 24/7 AI tutor for <b>SSC, RRB, TNPSC, Banking & JE Exams</b>.\n\nAsk me any doubt or question directly in the chat below!\n\n<i>Type <code>/exit</code> or click below anytime to exit.</i>`;
+      bot.editMessageText(text, {
+        chat_id: chatId, message_id: query.message.message_id, parse_mode: 'HTML',
+        reply_markup: { inline_keyboard: [[{ text: '🚪 Exit Tutor Mode', callback_data: 'exit_tutor' }]] }
+      });
+      bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    if (data === 'exit_tutor') {
+      activeTutorSessions.delete(chatId);
+      bot.editMessageText('🚪 <b>Exited AI Tutor Mode.</b> Back to Main Menu!', {
+        chat_id: chatId, message_id: query.message.message_id, parse_mode: 'HTML',
+        reply_markup: getMainKeyboard(chatId)
+      });
+      bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    // AI Syllabus Mapper Callbacks
+    if (data === 'syllabus_menu') {
+      bot.editMessageText(`🗺️ <b>AI Syllabus Mapper</b>\n━━━━━━━━━━━━━━━━━━━━\nSelect an exam to view your syllabus coverage:`, {
+        chat_id: chatId, message_id: query.message.message_id, parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🎖️ SSC', callback_data: 'syl_SSC' }, { text: '🚂 RRB', callback_data: 'syl_RRB' }],
+            [{ text: '🏛️ TNPSC', callback_data: 'syl_TNPSC' }, { text: '🏦 Bank', callback_data: 'syl_Bank' }],
+            [{ text: '⚙️ JE', callback_data: 'syl_JE' }],
+            [{ text: '🔙 Main Menu', callback_data: 'main_menu' }]
+          ]
+        }
+      });
+      bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    if (data.startsWith('syl_')) {
+      const exam = data.replace('syl_', '');
+      showSyllabusMap(chatId, exam, query.message.message_id);
+      bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    // Current Affairs Callback
+    if (data === 'current_affairs_start') {
+      bot.editMessageText('📰 <b>Generating Current Affairs 2025-2026 Digest...</b>\n\n🌟 Preparing 5 fresh MCQs...', {
+        chat_id: chatId, message_id: query.message.message_id, parse_mode: 'HTML'
+      });
+      const result = await generateQuestionsWithAnimation(chatId, 'Current Affairs 2025-2026', 'SSC', 'Current Affairs', 5);
+      if (!result) return;
+      const { questions, modelUsed } = result;
+      activeQuizzes.set(chatId, {
+        questions, current: 0, score: 0,
+        topic: 'Current Affairs 2025-2026', subject: 'Current Affairs', exam: 'SSC', modelUsed, wrongAnswers: [],
+        questionStartTime: Date.now(), totalTime: 0
+      });
+      bot.sendMessage(chatId, formatQuestion(questions[0], 1, questions.length), {
+        parse_mode: 'HTML', reply_markup: getAnswerKeyboard()
+      });
+      bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    // Flashcard Callbacks
+    if (data === 'flashcards_menu') {
+      showFlashcardMenu(chatId, query.message.message_id);
+      bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    if (data === 'gen_flashcards_select') {
+      bot.editMessageText(`🗃️ <b>Generate AI Flashcards</b>\n━━━━━━━━━━━━━━━━━━━━\nSelect an Exam:`, {
+        chat_id: chatId, message_id: query.message.message_id, parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🎖️ SSC (General Awareness)', callback_data: 'gen_fc_SSC_General Knowledge' }],
+            [{ text: '🚂 RRB (Science & Tech)', callback_data: 'gen_fc_RRB_Science' }],
+            [{ text: '🏛️ TNPSC (Tamil Culture & History)', callback_data: 'gen_fc_TNPSC_History and Culture' }],
+            [{ text: '🏦 Bank (Financial Awareness)', callback_data: 'gen_fc_Bank_General Awareness' }],
+            [{ text: '⚙️ JE (Engineering Formulas)', callback_data: 'gen_fc_JE_Thermodynamics' }],
+            [{ text: '🔙 Back', callback_data: 'flashcards_menu' }]
+          ]
+        }
+      });
+      bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    if (data.startsWith('gen_fc_')) {
+      const parts = data.replace('gen_fc_', '').split('_');
+      const exam = parts[0];
+      const subject = parts[1] || 'General Knowledge';
+      generateFlashcards(chatId, exam, subject, query.message.message_id);
+      bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    if (data === 'review_flashcards') {
+      const cards = userFlashcards.get(chatId) || [];
+      if (cards.length === 0) {
+        bot.answerCallbackQuery(query.id, 'No flashcards saved yet!', { show_alert: true });
+        return;
+      }
+      activeFlashcardSessions.set(chatId, { cards, current: 0, showingAnswer: false });
+      renderFlashcard(chatId, query.message.message_id);
+      bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    if (data === 'fc_reveal') {
+      const session = activeFlashcardSessions.get(chatId);
+      if (session) {
+        session.showingAnswer = true;
+        renderFlashcard(chatId, query.message.message_id);
+      }
+      bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    if (data === 'fc_know' || data === 'fc_again') {
+      const session = activeFlashcardSessions.get(chatId);
+      if (session) {
+        session.current++;
+        session.showingAnswer = false;
+        if (session.current >= session.cards.length) {
+          bot.editMessageText('🎉 <b>Flashcard Review Complete!</b>\n\nYou have reviewed all flashcards in this deck.', {
+            chat_id: chatId, message_id: query.message.message_id, parse_mode: 'HTML',
+            reply_markup: getMainKeyboard(chatId)
+          });
+          activeFlashcardSessions.delete(chatId);
+        } else {
+          renderFlashcard(chatId, query.message.message_id);
+        }
+      }
+      bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    // Exam Countdown Callbacks
+    if (data === 'countdown_menu') {
+      showCountdownDashboard(chatId, query.message.message_id);
+      bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    if (data === 'set_countdown_exam') {
+      bot.editMessageText(`📆 <b>Set Target Exam Date</b>\n━━━━━━━━━━━━━━━━━━━━\nSelect your target exam:`, {
+        chat_id: chatId, message_id: query.message.message_id, parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🎖️ SSC', callback_data: 'set_cd_exam_SSC' }, { text: '🚂 RRB', callback_data: 'set_cd_exam_RRB' }],
+            [{ text: '🏛️ TNPSC', callback_data: 'set_cd_exam_TNPSC' }, { text: '🏦 Bank', callback_data: 'set_cd_exam_Bank' }],
+            [{ text: '⚙️ JE', callback_data: 'set_cd_exam_JE' }],
+            [{ text: '🔙 Back', callback_data: 'countdown_menu' }]
+          ]
+        }
+      });
+      bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    if (data.startsWith('set_cd_exam_')) {
+      const exam = data.replace('set_cd_exam_', '');
+      topicInput.set(chatId, { step: 'set_countdown_date', exam });
+      bot.editMessageText(`📆 <b>Target Exam: ${exam}</b>\n\nPlease type and send your target exam date in <code>YYYY-MM-DD</code> format (e.g., <code>2026-11-20</code>):`, {
+        chat_id: chatId, message_id: query.message.message_id, parse_mode: 'HTML'
+      });
+      bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    if (data.startsWith('take_countdown_quiz_')) {
+      const parts = data.replace('take_countdown_quiz_', '').split('_');
+      const count = parseInt(parts[0]) || 10;
+      const exam = parts[1] || 'SSC';
+      bot.editMessageText(`🎯 <b>Daily Target Quiz (${count} Qs - ${exam})</b>\n\n🌟 Generating your recommended quota...`, {
+        chat_id: chatId, message_id: query.message.message_id, parse_mode: 'HTML'
+      });
+      const result = await generateQuestionsWithAnimation(chatId, 'Daily Target Quota', exam, 'General Knowledge', count);
+      if (!result) return;
+      const { questions, modelUsed } = result;
+      activeQuizzes.set(chatId, {
+        questions, current: 0, score: 0,
+        topic: 'Daily Target Quota', subject: 'General Knowledge', exam, modelUsed, wrongAnswers: [],
+        questionStartTime: Date.now(), totalTime: 0
+      });
+      bot.sendMessage(chatId, formatQuestion(questions[0], 1, questions.length), {
+        parse_mode: 'HTML', reply_markup: getAnswerKeyboard()
+      });
+      bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    // Mock Exam & PYQ Callbacks
+    if (data === 'mock_exam_menu') {
+      showMockExamMenu(chatId, query.message.message_id);
+      bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    if (data === 'pyq_menu') {
+      showPyqMenu(chatId, query.message.message_id);
+      bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    if (data.startsWith('start_mock_')) {
+      const parts = data.replace('start_mock_', '').split('_');
+      const exam = parts[0];
+      const count = parseInt(parts[1]) || 25;
+      startMockOrPyqSession(chatId, exam, count, `${exam} Full-Length Mock Exam`, false);
+      bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    if (data.startsWith('start_pyq_')) {
+      const parts = data.replace('start_pyq_', '').split('_');
+      const exam = parts[0];
+      const year = parts[1] || '2023';
+      startMockOrPyqSession(chatId, exam, 25, `${exam} ${year} Official PYQ Paper`, true);
+      bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    if (data.startsWith('mock_ans_')) {
+      const session = activeMockExams.get(chatId);
+      if (!session) {
+        bot.answerCallbackQuery(query.id, 'Mock exam session expired.');
+        return;
+      }
+      const choice = data.replace('mock_ans_', '');
+      session.userAnswers[session.current] = choice === 'SKIP' ? null : choice;
+      session.current++;
+
+      if (session.current < session.questions.length) {
+        renderMockQuestion(chatId, query.message.message_id);
+      } else {
+        finishMockExam(chatId, query.message.message_id);
+      }
+      bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    // Web Dashboard info Callback
+    if (data === 'web_dashboard_info') {
+      const port = process.env.PORT || 10000;
+      const text = `🌐 <b>ExamVault Companion Web Dashboard</b>\n━━━━━━━━━━━━━━━━━━━━\n` +
+        `Access your live visual telemetry dashboard on any web browser!\n\n` +
+        `• <b>Dashboard URL:</b> <code>http://localhost:${port}/</code>\n` +
+        `• <b>JSON Stats API:</b> <code>http://localhost:${port}/api/stats</code>\n\n` +
+        `<i>View user metrics, total token counts, engine polling status, and exam statistics live!</i>`;
+
+      bot.editMessageText(text, {
+        chat_id: chatId, message_id: query.message.message_id, parse_mode: 'HTML',
+        reply_markup: { inline_keyboard: [[{ text: '🔙 Main Menu', callback_data: 'main_menu' }]] }
+      });
+      bot.answerCallbackQuery(query.id);
+      return;
+    }
+
     // End of callback_query
     bot.answerCallbackQuery(query.id);
   } catch (globalError) {
@@ -3447,13 +4405,109 @@ process.on('unhandledRejection', (reason, promise) => {
 console.log('🤖 ExamVault Advanced Bot is running...');
 console.log('⏰ Monitoring for scheduled tests...');
 
-// Simple HTTP health check server for Render (Web Service)
+// HTTP Health & Web Dashboard Server (Feature 75)
 const PORT = process.env.PORT || 10000;
-http.createServer((req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end('ExamVault Bot Is Running OK');
+http.createServer(async (req, res) => {
+  if (req.url === '/api/stats') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    const liveStatus = await getLiveTokenStatus();
+    return res.end(JSON.stringify({
+      users: allUsers.size,
+      stats: globalTokenStats,
+      status: liveStatus
+    }));
+  }
+
+  res.writeHead(200, { 'Content-Type': 'text/html' });
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ExamVault AI Bot — Web Dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --card-bg: rgba(255, 255, 255, 0.04);
+      --border: rgba(255, 255, 255, 0.08);
+      --accent: #6366f1;
+      --text: #f3f4f6;
+      --muted: #9ca3af;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Outfit', sans-serif; }
+    body { background: var(--bg); color: var(--text); padding: 2rem; min-height: 100vh; }
+    .header { text-align: center; margin-bottom: 2.5rem; }
+    .header h1 { font-size: 2.5rem; font-weight: 700; background: linear-gradient(135deg, #a5b4fc, #6366f1, #c084fc); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .header p { color: var(--muted); margin-top: 0.5rem; font-size: 1.1rem; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; max-width: 1200px; margin: 0 auto; }
+    .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 16px; padding: 1.5rem; backdrop-filter: blur(12px); box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37); transition: transform 0.2s, border-color 0.2s; }
+    .card:hover { transform: translateY(-4px); border-color: var(--accent); }
+    .card-title { font-size: 0.9rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 0.5rem; }
+    .card-value { font-size: 2.2rem; font-weight: 700; color: #fff; }
+    .badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 20px; font-size: 0.85rem; font-weight: 600; background: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.3); }
+    .status-list { list-style: none; margin-top: 1rem; }
+    .status-list li { display: flex; justify-content: space-between; padding: 0.6rem 0; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.95rem; }
+    .commands-box { background: rgba(0,0,0,0.3); border-radius: 12px; padding: 1rem; font-family: monospace; color: #a5b4fc; font-size: 0.85rem; line-height: 1.6; margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>⚡ ExamVault Companion Web Dashboard</h1>
+    <p>Live AI Engine Telemetry & Performance Dashboard</p>
+  </div>
+  <div class="grid">
+    <div class="card">
+      <div class="card-title">Bot Health & Engine</div>
+      <div class="card-value"><span class="badge">🟢 ONLINE & POLLING</span></div>
+      <ul class="status-list">
+        <li><span>Registered Users</span><b>${allUsers.size} Users</b></li>
+        <li><span>Active Schedules</span><b>${userSchedules.size}</b></li>
+        <li><span>Bookmarked Qs</span><b>${userBookmarks.size}</b></li>
+        <li><span>Exam Date Goals</span><b>${userExamDates.size}</b></li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="card-title">Token Usage Telemetry</div>
+      <div class="card-value">${globalTokenStats.totalTokens.toLocaleString()}</div>
+      <ul class="status-list">
+        <li><span>Total AI API Requests</span><b>${globalTokenStats.totalRequests} calls</b></li>
+        <li><span>Prompt Tokens</span><b>${globalTokenStats.totalPromptTokens.toLocaleString()}</b></li>
+        <li><span>Completion Tokens</span><b>${globalTokenStats.totalCompletionTokens.toLocaleString()}</b></li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="card-title">Supported Exams</div>
+      <div class="card-value" style="font-size:1.4rem;">5 Core Categories</div>
+      <ul class="status-list">
+        <li><span>🎖️ SSC Exams</span><b>CGL, CHSL, MTS</b></li>
+        <li><span>🚂 Railway Exams</span><b>RRB NTPC, Group D</b></li>
+        <li><span>🏛️ TNPSC</span><b>Group 1, 2, 4</b></li>
+        <li><span>🏦 Banking</span><b>IBPS, SBI PO</b></li>
+        <li><span>⚙️ Engineering</span><b>RRB JE, SSC JE</b></li>
+      </ul>
+    </div>
+  </div>
+  <div style="max-width:1200px; margin: 2rem auto 0 auto;">
+    <div class="card">
+      <div class="card-title">Telegram Bot Quick Reference Commands</div>
+      <div class="commands-box">
+        /mock - Start a full-length timed mock exam<br>
+        /pyq - Practice official Previous Year Papers<br>
+        /tutor [query] - Enter 24/7 AI tutor mode<br>
+        /syllabus [exam] - View AI syllabus coverage & gap map<br>
+        /currentaffairs - Instant Current Affairs 2025-2026 digest<br>
+        /flashcard - Revision flashcards<br>
+        /countdown - Exam target countdown & daily quota<br>
+        /stats - Performance dashboard
+      </div>
+    </div>
+  </div>
+</body>
+</html>`;
+  res.end(html);
 }).listen(PORT, '0.0.0.0', () => {
-  console.log(`🌐 Health check server listening on port ${PORT}`);
+  console.log(`🌐 Health & Web Dashboard server listening on port ${PORT}`);
 });
 
 // Graceful shutdown to prevent "409 Conflict" on Telegram for Render (Zero-Downtime Deploy)

@@ -5,6 +5,8 @@
   "main": "telegram_advanced_bot.js",
   "scripts": {
     "start": "node telegram_advanced_bot.js",
+    "validate-keys": "node validate_env_keys.js",
+    "watch:env": "node validate_env_keys.js --watch",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
