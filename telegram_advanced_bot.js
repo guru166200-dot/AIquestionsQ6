@@ -1060,24 +1060,58 @@ async function generateQuestionsWithChatGPT(topic, exam, subject, count = 10, pa
 /**
  * Generate questions with fallback logic
  */
+async function generateQuestionsWithGroq(topic, exam, subject, count = 10, pastedText = null) {
+  const groqKey = process.env.GROQ_API_KEY;
+  if (!groqKey) return null;
+  const seed = Date.now().toString(36);
+  const models = ['llama-3.3-70b-versatile', 'llama-3.1-70b-versatile', 'mixtral-8x7b-32768'];
+  for (const model of models) {
+    try {
+      console.log(`Trying Groq model: ${model}...`);
+      const response = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
+        model,
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: getSystemPrompt(exam, subject, topic, count, pastedText, seed) },
+          { role: 'user', content: getUserPrompt(exam, subject, topic, count, pastedText, seed) }
+        ]
+      }, { headers: { 'Authorization': `Bearer ${groqKey}`, 'Content-Type': 'application/json' }, timeout: 60000 });
+      const text = response.data.choices[0].message.content;
+      const parsed = JSON.parse(text);
+      if (parsed.questions && parsed.questions.length > 0) {
+        console.log(`✅ Success with Groq model: ${model}`);
+        return { questions: parsed.questions, modelUsed: `Groq (${model})` };
+      }
+    } catch (error) {
+      console.warn(`⚠️ Groq model ${model} failed: ${error.response?.data?.error?.message || error.message}`);
+    }
+  }
+  return null;
+}
+
 async function generateQuestions(topic, exam, subject, count = 10, pastedText = null) {
   console.log('Attempting to generate questions using Gemini AI...');
   let questions = await generateQuestionsWithGemini(topic, exam, subject, count, pastedText);
-
   if (questions && questions.length > 0) {
     console.log('✅ Successfully generated questions with Gemini.');
-    return questions;
+    return { questions, modelUsed: `Gemini (${LAST_WORKING_GEMINI_MODEL || 'auto'})` };
   }
 
-  console.log('⚠️ Gemini failed. Falling back to ChatGPT...');
-  questions = await generateQuestionsWithChatGPT(topic, exam, subject, count, pastedText);
+  console.log('⚠️ Gemini failed. Falling back to Groq (Llama)...');
+  const groqResult = await generateQuestionsWithGroq(topic, exam, subject, count, pastedText);
+  if (groqResult) {
+    console.log('✅ Successfully generated questions with Groq.');
+    return groqResult;
+  }
 
+  console.log('⚠️ Groq failed. Falling back to ChatGPT...');
+  questions = await generateQuestionsWithChatGPT(topic, exam, subject, count, pastedText);
   if (questions && questions.length > 0) {
     console.log('✅ Successfully generated questions with ChatGPT.');
-    return questions;
+    return { questions, modelUsed: 'ChatGPT (gpt-4o-mini)' };
   }
 
-  console.log('❌ Both AI models failed to generate questions.');
+  console.log('❌ All AI models failed to generate questions.');
   return null;
 }
 
@@ -1134,7 +1168,7 @@ async function generateQuestionsWithAnimation(chatId, topic, exam, subject, coun
     } catch (e) { /* Ignore minor edit errors */ }
   }, 2000);
 
-  const questions = await generateQuestions(topic, exam, subject, count, pastedText);
+  const result = await generateQuestions(topic, exam, subject, count, pastedText);
   clearInterval(animInterval);
 
   // Check if cancelled
@@ -1143,10 +1177,12 @@ async function generateQuestionsWithAnimation(chatId, topic, exam, subject, coun
     return null;
   }
 
-  if (questions && questions.length > 0) {
+  if (result && result.questions && result.questions.length > 0) {
+    const { questions, modelUsed } = result;
+    const modelEmoji = modelUsed.includes('Gemini') ? '🔵' : modelUsed.includes('Groq') ? '🟣' : '🟢';
     try {
       await bot.editMessageText(
-        `✨ <b>ExamVault Luminance</b>\n━━━━━━━━━━━━━━━━━━━━\n✅ <b>Manifestation Complete!</b>\n\n${getGlowProgressBar(100)}\n\n<i>Topic: ${topic}</i>`,
+        `✨ <b>ExamVault Luminance</b>\n━━━━━━━━━━━━━━━━━━━━\n✅ <b>Manifestation Complete!</b>\n\n${getGlowProgressBar(100)}\n\n<i>Topic: ${topic}</i>\n\n${modelEmoji} <b>AI Model:</b> <code>${escapeHTML(modelUsed)}</code>`,
         {
           chat_id: chatId,
           message_id: statusMsg.message_id,
@@ -1154,7 +1190,14 @@ async function generateQuestionsWithAnimation(chatId, topic, exam, subject, coun
         }
       );
     } catch (e) { }
-    return questions;
+
+    // Immediately save to Notion — don't wait for quiz end
+    bot.sendMessage(chatId, `💾 <b>Saving ${questions.length} questions to Notion...</b>\n📂 <b>Path:</b> ${escapeHTML(exam)} › ${escapeHTML(subject)} › ${escapeHTML(topic)}`, { parse_mode: 'HTML' });
+    saveAllQuestionsToNotion(exam, subject, topic, questions, chatId).catch(e => {
+      console.error('Background Notion save failed:', e.message);
+    });
+
+    return { questions, modelUsed };
   }
 
   // Failure fallback
@@ -1765,15 +1808,16 @@ Please enter the number of Sets (e.g., 1, 2, 3).
     input.count = count;
 
     if (input.mode === 'take_now' || input.mode === 'paster') {
-      const questions = await generateQuestionsWithAnimation(chatId, input.topic, input.exam, input.subject, count, input.pastedText);
+      const result = await generateQuestionsWithAnimation(chatId, input.topic, input.exam, input.subject, count, input.pastedText);
 
-      if (!questions) {
+      if (!result) {
         topicInput.delete(chatId);
         return;
       }
 
-      activeQuizzes.set(chatId, { questions, current: 0, score: 0, topic: input.topic, subject: input.subject, exam: input.exam });
-      bot.sendMessage(chatId, `🎯 Test ready! (Saving to Notion AFTER you finish)`);
+      const { questions, modelUsed } = result;
+      activeQuizzes.set(chatId, { questions, current: 0, score: 0, topic: input.topic, subject: input.subject, exam: input.exam, modelUsed });
+      bot.sendMessage(chatId, `🎯 <b>Test ready! ${questions.length} questions loaded.</b>\n\n🤖 <b>Generated by:</b> <code>${escapeHTML(modelUsed)}</code>\n💾 <b>Notion save is running in the background.</b>`, { parse_mode: 'HTML' });
       bot.sendMessage(chatId, formatQuestion(questions[0], 1, questions.length), { parse_mode: 'HTML', reply_markup: getAnswerKeyboard() });
       topicInput.delete(chatId);
     } else {
@@ -1929,14 +1973,7 @@ bot.on('callback_query', async (query) => {
       } else {
         // Quiz finished — Save Stats
         recordQuizStats(chatId, quiz.exam, quiz.subject, quiz.score, quiz.questions.length);
-
-        const summaryMsg = await bot.sendMessage(chatId, `💾 <b>Finishing Quiz and Saving to Notion...</b>`, { parse_mode: 'HTML' });
-
-        try {
-          await saveAllQuestionsToNotion(quiz.exam, quiz.subject, quiz.topic, quiz.questions, chatId);
-        } catch (notionError) {
-          console.error('Final Notion Save Error:', notionError.message);
-        }
+        // Note: Notion was already saved immediately after generation — no need to re-save here
 
         const pct = quiz.questions.length > 0 ? Math.round((quiz.score / quiz.questions.length) * 100) : 0;
         const grade = pct >= 80 ? '🏆 Outstanding!' : pct >= 60 ? '🎉 Good Job!' : pct >= 40 ? '💪 Keep Going!' : '📖 Needs Practice';
@@ -1955,6 +1992,7 @@ bot.on('callback_query', async (query) => {
 📂 <b>Topic:</b> ${quiz.topic}
 📚 <b>Subject:</b> ${quiz.subject}
 🎯 <b>Exam:</b> ${quiz.exam}
+🤖 <b>AI Model:</b> <code>${escapeHTML(quiz.modelUsed || 'Auto')}</code>
 
 ${grade}
 
@@ -2691,12 +2729,13 @@ Status: <b>${schedule.status.toUpperCase()}</b>
         chat_id: chatId, message_id: query.message.message_id, parse_mode: 'HTML'
       });
 
-      const questions = await generateQuestionsWithAnimation(chatId, topic, input.exam, subject, 5);
-      if (!questions) return;
+      const result = await generateQuestionsWithAnimation(chatId, topic, input.exam, subject, 5);
+      if (!result) return;
+      const { questions, modelUsed } = result;
 
       activeQuizzes.set(chatId, {
         questions, current: 0, score: 0,
-        topic, subject, exam: input.exam, wrongAnswers: [],
+        topic, subject, exam: input.exam, modelUsed, wrongAnswers: [],
         questionStartTime: Date.now(), totalTime: 0
       });
       bot.sendMessage(chatId, formatQuestion(questions[0], 1, questions.length), {
@@ -2733,12 +2772,13 @@ Status: <b>${schedule.status.toUpperCase()}</b>
       });
 
       const topic = weakestSubj;
-      const questions = await generateQuestionsWithAnimation(chatId, topic, weakestExam, weakestSubj, 5);
-      if (!questions) return;
+      const result = await generateQuestionsWithAnimation(chatId, topic, weakestExam, weakestSubj, 5);
+      if (!result) return;
+      const { questions, modelUsed } = result;
 
       activeQuizzes.set(chatId, {
         questions, current: 0, score: 0,
-        topic, subject: weakestSubj, exam: weakestExam, wrongAnswers: [],
+        topic, subject: weakestSubj, exam: weakestExam, modelUsed, wrongAnswers: [],
         questionStartTime: Date.now(), totalTime: 0
       });
       bot.sendMessage(chatId, formatQuestion(questions[0], 1, questions.length), {
@@ -2777,7 +2817,7 @@ cron.schedule('* * * * *', async () => {
       saveSchedules(); // Update status in file
 
       // Generate questions with animated luminance UI
-      const questions = await generateQuestionsWithAnimation(
+      const result = await generateQuestionsWithAnimation(
         chatId,
         schedule.topic,
         schedule.exam,
@@ -2785,24 +2825,26 @@ cron.schedule('* * * * *', async () => {
         schedule.count || 10
       );
 
-      if (!questions || questions.length === 0) {
+      if (!result || !result.questions || result.questions.length === 0) {
         // schedule was reassigned or failed
         schedule.status = 'scheduled'; // Allow retry
         saveSchedules();
         continue;
       }
 
+      const { questions, modelUsed } = result;
       schedule.status = 'completed';
       saveSchedules();
 
-      // NO saveAllQuestionsToNotion call here
+      // Notion was already saved inside generateQuestionsWithAnimation
       activeQuizzes.set(chatId, {
         questions,
         current: 0,
         score: 0,
         topic: schedule.topic,
         subject: schedule.subject,
-        exam: schedule.exam
+        exam: schedule.exam,
+        modelUsed
       });
 
       const firstQ = questions[0];
