@@ -2543,6 +2543,70 @@ async function generateQuestionsWithGroq(topic, exam, subject, count = 10, paste
 }
 
 /**
+ * Generate questions using OpenRouter API (with multiple free model fallbacks)
+ */
+async function generateQuestionsWithOpenRouter(topic, exam, subject, count = 10, pastedText = null, customSeed = null) {
+  const openrouterKey = process.env.OPENROUTER_API_KEY || OPENROUTER_API_KEY;
+  if (!openrouterKey) return null;
+  const seed = customSeed || (Date.now().toString(36) + Math.random().toString(36).substring(2, 7));
+  const models = [
+    'openai/gpt-oss-20b:free',
+    'google/gemma-4-31b-it:free',
+    'nvidia/nemotron-3-nano-30b-a3b:free',
+    'inclusionai/ling-3.0-flash:free',
+    'poolside/laguna-xs-2.1:free'
+  ];
+
+  for (const model of models) {
+    try {
+      console.log(`Trying OpenRouter model: ${model}...`);
+      const response = await axios.post(
+        'https://openrouter.ai/api/v1/chat/completions',
+        {
+          model: model,
+          response_format: { type: 'json_object' },
+          messages: [
+            { role: 'system', content: getSystemPrompt(exam, subject, topic, count, pastedText, seed) },
+            { role: 'user', content: getUserPrompt(exam, subject, topic, count, pastedText, seed) }
+          ]
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${openrouterKey}`,
+            'HTTP-Referer': 'https://examvault.app',
+            'X-Title': 'ExamVault Bot'
+          },
+          timeout: 60000
+        }
+      );
+
+      const data = response.data;
+      if (data.choices && data.choices[0] && data.choices[0].message) {
+        const text = data.choices[0].message.content;
+        const parsed = safeParseJSON(text);
+        if (parsed && parsed.questions && parsed.questions.length > 0) {
+          console.log(`✅ Success with OpenRouter model: ${model}`);
+
+          const usage = data.usage || {};
+          const p = usage.prompt_tokens || 0;
+          const c = usage.completion_tokens || 0;
+          const t = usage.total_tokens || (p + c);
+          const tokenUsage = { promptTokens: p, completionTokens: c, totalTokens: t };
+
+          recordTokenUsage(`OpenRouter (${model})`, tokenUsage);
+          return { questions: parsed.questions, modelUsed: `OpenRouter (${model})`, tokenUsage };
+        }
+      }
+    } catch (error) {
+      console.warn(`⚠️ OpenRouter model ${model} failed or unavailable: ${error.message}`);
+    }
+  }
+
+  return null;
+}
+
+/**
  * Generate a single set/batch of questions (up to count, default 5) using AI model fallbacks
  */
 async function generateSingleSetQuestions(topic, exam, subject, count = 5, pastedText = null, batchIndex = 0) {
@@ -2571,6 +2635,13 @@ async function generateSingleSetQuestions(topic, exam, subject, count = 5, paste
   if (chatGptResult && chatGptResult.questions && chatGptResult.questions.length > 0) {
     console.log(`[Set ${batchIndex + 1}] ✅ ChatGPT successful.`);
     return chatGptResult;
+  }
+
+  console.log(`[Set ${batchIndex + 1}] ⚠️ ChatGPT failed. Falling back to OpenRouter...`);
+  const openRouterResult = await generateQuestionsWithOpenRouter(topic, exam, subject, count, pastedText, seed);
+  if (openRouterResult && openRouterResult.questions && openRouterResult.questions.length > 0) {
+    console.log(`[Set ${batchIndex + 1}] ✅ OpenRouter successful.`);
+    return openRouterResult;
   }
 
   console.log(`[Set ${batchIndex + 1}] ❌ All AI models failed for this set.`);
@@ -3083,20 +3154,38 @@ Keep response concise, engaging, and under 300 words.`;
         { contents: [{ parts: [{ text: prompt }] }] },
         { timeout: 30000 }
       );
-      replyText = res.data.candidates[0].content.parts[0].text;
-    } catch (e) {
-      const groqKey = process.env.GROQ_API_KEY;
-      if (groqKey) {
-        const groqRes = await axios.post(
-          'https://api.groq.com/openai/v1/chat/completions',
-          { model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: prompt }] },
-          { headers: { 'Authorization': `Bearer ${groqKey}`, 'Content-Type': 'application/json' }, timeout: 20000 }
-        );
-        replyText = groqRes.data.choices[0].message.content;
-      } else {
-        throw e;
+      } catch (e) {
+        const groqKey = process.env.GROQ_API_KEY;
+        const openrouterKey = process.env.OPENROUTER_API_KEY || OPENROUTER_API_KEY;
+        if (groqKey) {
+          try {
+            const groqRes = await axios.post(
+              'https://api.groq.com/openai/v1/chat/completions',
+              { model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: prompt }] },
+              { headers: { 'Authorization': `Bearer ${groqKey}`, 'Content-Type': 'application/json' }, timeout: 20000 }
+            );
+            replyText = groqRes.data.choices[0].message.content;
+          } catch (gErr) {
+            if (openrouterKey) {
+              const orRes = await axios.post(
+                'https://openrouter.ai/api/v1/chat/completions',
+                { model: 'openai/gpt-oss-20b:free', messages: [{ role: 'user', content: prompt }] },
+                { headers: { 'Authorization': `Bearer ${openrouterKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': 'https://examvault.app', 'X-Title': 'ExamVault Bot' }, timeout: 20000 }
+              );
+              replyText = orRes.data.choices[0].message.content;
+            } else { throw gErr; }
+          }
+        } else if (openrouterKey) {
+          const orRes = await axios.post(
+            'https://openrouter.ai/api/v1/chat/completions',
+            { model: 'openai/gpt-oss-20b:free', messages: [{ role: 'user', content: prompt }] },
+            { headers: { 'Authorization': `Bearer ${openrouterKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': 'https://examvault.app', 'X-Title': 'ExamVault Bot' }, timeout: 20000 }
+          );
+          replyText = orRes.data.choices[0].message.content;
+        } else {
+          throw e;
+        }
       }
-    }
 
     let cleaned = escapeHTML(replyText)
       .replace(/&lt;b&gt;(.*?)&lt;\/b&gt;/g, '<b>$1</b>')
