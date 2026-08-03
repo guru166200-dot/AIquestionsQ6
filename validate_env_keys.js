@@ -250,6 +250,69 @@ async function validateGroq(key) {
   }
 }
 
+/** Validate OpenRouter API Key */
+async function validateOpenRouter(key) {
+  const freeModels = [
+    'openai/gpt-oss-20b:free',
+    'google/gemma-4-31b-it:free',
+    'nvidia/nemotron-3-nano-30b-a3b:free',
+    'inclusionai/ling-3.0-flash:free',
+    'poolside/laguna-xs-2.1:free'
+  ];
+
+  let lastErr = null;
+  let quotaHit = false;
+
+  for (const model of freeModels) {
+    try {
+      const res = await httpPost(
+        'openrouter.ai',
+        '/api/v1/chat/completions',
+        { 
+          Authorization: `Bearer ${key}`,
+          'HTTP-Referer': 'https://examvault.app',
+          'X-Title': 'ExamVault Bot'
+        },
+        {
+          model,
+          messages: [{ role: 'user', content: 'hi' }],
+          max_tokens: 2,
+        }
+      );
+
+      if (res.status === 200 && res.data.choices) {
+        return { valid: true, detail: `OpenRouter (${model}) responded successfully` };
+      }
+
+      const msg = res.data?.error?.message || `HTTP ${res.status}`;
+
+      if (res.status === 429 || msg.toLowerCase().includes('rate-limited') || msg.toLowerCase().includes('quota')) {
+        quotaHit = true;
+        lastErr = `${model} -> ${msg}`;
+        continue;
+      }
+
+      if (res.status === 401 || msg.toLowerCase().includes('invalid api key')) {
+        return { valid: false, detail: `Invalid API key: ${msg}` };
+      }
+
+      lastErr = `${model} -> ${msg}`;
+    } catch (e) {
+      lastErr = e.message;
+    }
+  }
+
+  if (quotaHit) {
+    return {
+      valid: true,
+      quota: true,
+      detail: 'Key is VALID — free tier models rate limited. Retry shortly.',
+    };
+  }
+
+  return { valid: false, detail: `OpenRouter Key Error: ${lastErr || 'No models responded'}` };
+}
+
 /** Validate Notion API Key (just check auth, don't need DB) */
 async function validateNotion(key) {
   return new Promise((resolve) => {
@@ -322,11 +385,12 @@ async function validateTelegram(token) {
 
 // ─── KEY CONFIG MAP ───────────────────────────────────────────────────────────
 const KEY_VALIDATORS = {
-  GEMINI_API_KEY:      { label: 'Gemini AI',      validate: validateGemini,  icon: '🔵' },
-  OPENAI_API_KEY:      { label: 'OpenAI (GPT)',    validate: validateOpenAI,  icon: '🟢' },
-  GROQ_API_KEY:        { label: 'Groq (Llama)',    validate: validateGroq,    icon: '🟣' },
-  NOTION_API_KEY:      { label: 'Notion',          validate: validateNotion,  icon: '📓' },
-  TELEGRAM_BOT_TOKEN:  { label: 'Telegram Bot',    validate: validateTelegram,icon: '✈️' },
+  GEMINI_API_KEY:      { label: 'Gemini AI',      validate: validateGemini,     icon: '🔵' },
+  OPENAI_API_KEY:      { label: 'OpenAI (GPT)',    validate: validateOpenAI,     icon: '🟢' },
+  GROQ_API_KEY:        { label: 'Groq (Llama)',    validate: validateGroq,       icon: '🟣' },
+  OPENROUTER_API_KEY:  { label: 'OpenRouter',      validate: validateOpenRouter, icon: '🌐' },
+  NOTION_API_KEY:      { label: 'Notion',          validate: validateNotion,     icon: '📓' },
+  TELEGRAM_BOT_TOKEN:  { label: 'Telegram Bot',    validate: validateTelegram,   icon: '✈️' },
 };
 
 // Non-API keys (no validation needed — just check they're not empty)

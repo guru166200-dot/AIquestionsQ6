@@ -23,6 +23,7 @@ const NOTION_KEY = process.env.NOTION_API_KEY;
 const NOTION_PARENT_DB = process.env.NOTION_PARENT_DB;
 let GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 let OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+let OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const ADMIN_ID = process.env.ADMIN_ID ? parseInt(process.env.ADMIN_ID) : null;
 
 // Global tracker for automatic model selection
@@ -37,8 +38,8 @@ if (!TOKEN) {
 if (!NOTION_KEY || !NOTION_PARENT_DB) {
   console.warn("⚠️ WARNING: Notion credentials are not fully set. Notion features might fail.");
 }
-if (!GEMINI_API_KEY && !OPENAI_API_KEY) {
-  console.warn("⚠️ WARNING: No AI API keys (Gemini/OpenAI) found. Question generation will fail.");
+if (!GEMINI_API_KEY && !OPENAI_API_KEY && !process.env.GROQ_API_KEY && !OPENROUTER_API_KEY) {
+  console.warn("⚠️ WARNING: No AI API keys (Gemini/OpenAI/Groq/OpenRouter) found. Question generation will fail.");
 }
 
 function updateEnvFile(key, value) {
@@ -143,6 +144,7 @@ async function getLiveTokenStatus(forceRefresh = false) {
     gemini: { ok: false, details: 'Checking...' },
     groq: { ok: false, details: 'Checking...' },
     openai: { ok: false, details: 'Checking...' },
+    openrouter: { ok: false, details: 'Checking...' },
     notion: { ok: false, details: 'Checking...' },
     updatedAt: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
   };
@@ -214,7 +216,35 @@ async function getLiveTokenStatus(forceRefresh = false) {
     }
   }
 
-  // 4. Notion
+  // 4. OpenRouter
+  const openrouterKey = process.env.OPENROUTER_API_KEY || OPENROUTER_API_KEY;
+  if (!openrouterKey) {
+    status.openrouter = { ok: false, details: '❌ Key Missing' };
+  } else {
+    try {
+      const res = await axios.post(
+        'https://openrouter.ai/api/v1/chat/completions',
+        { model: 'openai/gpt-oss-20b:free', messages: [{ role: 'user', content: 'hi' }], max_tokens: 2 },
+        { 
+          headers: { 
+            'Authorization': `Bearer ${openrouterKey}`, 
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://examvault.app',
+            'X-Title': 'ExamVault Bot'
+          }, 
+          timeout: 5000 
+        }
+      );
+      if (res.data.choices) {
+        status.openrouter = { ok: true, details: '🟢 ACTIVE (Free Models)' };
+      }
+    } catch (e) {
+      const err = e.response?.data?.error?.message || e.message;
+      status.openrouter = { ok: false, details: (err.includes('rate-limited') || err.includes('quota') || e.response?.status === 429) ? '⚠️ Rate Limited' : '❌ Key Error' };
+    }
+  }
+
+  // 5. Notion
   const notionKey = process.env.NOTION_API_KEY;
   const notionDb = process.env.NOTION_PARENT_DB;
   if (notionKey && notionDb) {
@@ -237,9 +267,10 @@ let globalTokenStats = {
   lastTestTokens: { promptTokens: 0, completionTokens: 0, totalTokens: 0, model: 'None' },
   // Per-model cumulative stats
   byModel: {
-    gemini:  { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0 },
-    groq:    { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0 },
-    openai:  { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0 }
+    gemini:     { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+    groq:       { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+    openai:     { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+    openrouter: { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0 }
   }
 };
 
@@ -261,9 +292,10 @@ function loadTokenStats() {
         ...globalTokenStats,
         ...loaded,
         byModel: {
-          gemini:  { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0, ...(loaded.byModel?.gemini || {}) },
-          groq:    { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0, ...(loaded.byModel?.groq   || {}) },
-          openai:  { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0, ...(loaded.byModel?.openai  || {}) }
+          gemini:     { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0, ...(loaded.byModel?.gemini     || {}) },
+          groq:       { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0, ...(loaded.byModel?.groq       || {}) },
+          openai:     { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0, ...(loaded.byModel?.openai     || {}) },
+          openrouter: { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0, ...(loaded.byModel?.openrouter || {}) }
         }
       };
       console.log(`🔤 Loaded token stats: ${globalTokenStats.totalTokens} total tokens used.`);
@@ -287,14 +319,15 @@ function recordTokenUsage(model, usage) {
   // Accumulate per-model
   const mLow = model.toLowerCase();
   let bucket;
-  if (mLow.includes('gemini'))      bucket = 'gemini';
-  else if (mLow.includes('groq'))   bucket = 'groq';
+  if (mLow.includes('gemini'))           bucket = 'gemini';
+  else if (mLow.includes('groq'))        bucket = 'groq';
+  else if (mLow.includes('openrouter'))  bucket = 'openrouter';
   else if (mLow.includes('chatgpt') || mLow.includes('openai') || mLow.includes('gpt')) bucket = 'openai';
   if (bucket) {
-    globalTokenStats.byModel[bucket].requests      += 1;
-    globalTokenStats.byModel[bucket].promptTokens  += p;
+    globalTokenStats.byModel[bucket].requests         += 1;
+    globalTokenStats.byModel[bucket].promptTokens     += p;
     globalTokenStats.byModel[bucket].completionTokens += c;
-    globalTokenStats.byModel[bucket].totalTokens   += t;
+    globalTokenStats.byModel[bucket].totalTokens      += t;
   }
 
   saveTokenStats();
@@ -312,7 +345,7 @@ function formatLiveTokenCountMessage() {
   };
   const pct = (val, total) => total > 0 ? ((val / total) * 100).toFixed(1) + '%' : '0%';
 
-  const maxT = Math.max(bm.gemini.totalTokens, bm.groq.totalTokens, bm.openai.totalTokens, 1);
+  const maxT = Math.max(bm.gemini.totalTokens, bm.groq.totalTokens, bm.openai.totalTokens, bm.openrouter.totalTokens, 1);
 
   const lastLine = last && last.totalTokens > 0
     ? `📌 <b>Last Generation</b>\n` +
@@ -337,6 +370,9 @@ function formatLiveTokenCountMessage() {
     `🟣 <b>Groq (Llama)</b>  (${bm.groq.requests} calls)\n` +
     `   <code>${bar(bm.groq.totalTokens, maxT)} ${bm.groq.totalTokens.toLocaleString()} tokens (${pct(bm.groq.totalTokens, g.totalTokens)})</code>\n` +
     `   ↳ Prompt: <code>${bm.groq.promptTokens.toLocaleString()}</code>  Completion: <code>${bm.groq.completionTokens.toLocaleString()}</code>\n\n` +
+    `🌐 <b>OpenRouter</b>  (${bm.openrouter.requests} calls)\n` +
+    `   <code>${bar(bm.openrouter.totalTokens, maxT)} ${bm.openrouter.totalTokens.toLocaleString()} tokens (${pct(bm.openrouter.totalTokens, g.totalTokens)})</code>\n` +
+    `   ↳ Prompt: <code>${bm.openrouter.promptTokens.toLocaleString()}</code>  Completion: <code>${bm.openrouter.completionTokens.toLocaleString()}</code>\n\n` +
     `🟢 <b>OpenAI (GPT)</b>  (${bm.openai.requests} calls)\n` +
     `   <code>${bar(bm.openai.totalTokens, maxT)} ${bm.openai.totalTokens.toLocaleString()} tokens (${pct(bm.openai.totalTokens, g.totalTokens)})</code>\n` +
     `   ↳ Prompt: <code>${bm.openai.promptTokens.toLocaleString()}</code>  Completion: <code>${bm.openai.completionTokens.toLocaleString()}</code>\n\n` +
@@ -361,6 +397,7 @@ function formatPinnedTokenDashboardText(status) {
     `<b>🤖 Active AI Providers:</b>\n` +
     `• 🔵 <b>Gemini AI:</b> ${status.gemini.details}\n` +
     `• 🟣 <b>Groq (Llama 3.3):</b> ${status.groq.details}\n` +
+    `• 🌐 <b>OpenRouter:</b> ${status.openrouter.details}\n` +
     `• 🟢 <b>OpenAI (GPT-4o):</b> ${status.openai.details}\n\n` +
     `<b>📊 Live Token Count & Usage:</b>\n` +
     `• 🔤 <b>Last Generation:</b> <code>${lastFormatted}</code>\n` +
@@ -1396,6 +1433,34 @@ async function generatePyqYearQuestions(examCatalogKey, year, section, subject, 
       }
     }
 
+    // Fallback: OpenRouter
+    const openrouterKey = process.env.OPENROUTER_API_KEY || OPENROUTER_API_KEY;
+    if (!batchResult && openrouterKey) {
+      for (const model of ['openai/gpt-oss-20b:free', 'google/gemma-4-31b-it:free', 'nvidia/nemotron-3-nano-30b-a3b:free', 'inclusionai/ling-3.0-flash:free']) {
+        try {
+          const resp = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
+            model, response_format: { type: 'json_object' },
+            messages: [{ role: 'system', content: sysPrompt }, { role: 'user', content: userPrompt }]
+          }, { 
+            headers: { 
+              'Content-Type': 'application/json', 
+              'Authorization': `Bearer ${openrouterKey}`,
+              'HTTP-Referer': 'https://examvault.app',
+              'X-Title': 'ExamVault Bot'
+            }, 
+            timeout: 60000 
+          });
+          const parsed = safeParseJSON(resp.data.choices[0].message.content);
+          if (parsed && parsed.questions && parsed.questions.length > 0) {
+            batchResult = { questions: parsed.questions, modelUsed: `OpenRouter (${model})` };
+            const usage = resp.data.usage || {};
+            recordTokenUsage(`OpenRouter (${model})`, { promptTokens: usage.prompt_tokens || 0, completionTokens: usage.completion_tokens || 0, totalTokens: usage.total_tokens || 0 });
+            break;
+          }
+        } catch (e4) { console.warn(`[PYQ] OpenRouter ${model} failed: ${e4.message}`); }
+      }
+    }
+
     if (batchResult && batchResult.questions && batchResult.questions.length > 0) {
       allQuestions.push(...batchResult.questions);
       modelUsedSet.add(batchResult.modelUsed);
@@ -1910,6 +1975,34 @@ async function generateMockSectionQuestions(exam, section, subject, count, patte
         } catch (e3) {
           console.warn(`[MockGen] ChatGPT ${model} failed: ${e3.message}`);
         }
+      }
+    }
+
+    // Fallback: OpenRouter
+    const openrouterKey = process.env.OPENROUTER_API_KEY || OPENROUTER_API_KEY;
+    if (!batchResult && openrouterKey) {
+      for (const model of ['openai/gpt-oss-20b:free', 'google/gemma-4-31b-it:free', 'nvidia/nemotron-3-nano-30b-a3b:free', 'inclusionai/ling-3.0-flash:free']) {
+        try {
+          const resp = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
+            model, response_format: { type: 'json_object' },
+            messages: [{ role: 'system', content: sysPrompt }, { role: 'user', content: userPrompt }]
+          }, { 
+            headers: { 
+              'Content-Type': 'application/json', 
+              'Authorization': `Bearer ${openrouterKey}`,
+              'HTTP-Referer': 'https://examvault.app',
+              'X-Title': 'ExamVault Bot'
+            }, 
+            timeout: 60000 
+          });
+          const parsed = safeParseJSON(resp.data.choices[0].message.content);
+          if (parsed && parsed.questions && parsed.questions.length > 0) {
+            batchResult = { questions: parsed.questions, modelUsed: `OpenRouter (${model})` };
+            const usage = resp.data.usage || {};
+            recordTokenUsage(`OpenRouter (${model})`, { promptTokens: usage.prompt_tokens || 0, completionTokens: usage.completion_tokens || 0, totalTokens: usage.total_tokens || 0 });
+            break;
+          }
+        } catch (e4) { console.warn(`[MockGen] OpenRouter ${model} failed: ${e4.message}`); }
       }
     }
 
@@ -2858,6 +2951,7 @@ function getSettingsKeyboard() {
       [{ text: '🆔 Update Notion ID', callback_data: 'update_notion_id' }],
       [{ text: '🔑 Update Gemini Key', callback_data: 'update_gemini_key' }],
       [{ text: '🟣 Update Groq Key', callback_data: 'update_groq_key' }],
+      [{ text: '🌐 Update OpenRouter Key', callback_data: 'update_openrouter_key' }],
       [{ text: '🔑 Update OpenAI Key', callback_data: 'update_openai_key' }],
       [{ text: '🤖 Update Bot Token', callback_data: 'update_bot_token' }],
       [{ text: '🔙 Back to Menu', callback_data: 'main_menu' }]
@@ -4252,6 +4346,58 @@ bot.on('message', async (msg) => {
     return;
   }
 
+  if (input.step === 'update_openrouter_key') {
+    const tempKey = msg.text.trim();
+    bot.sendMessage(chatId, '🔍 <b>Testing OpenRouter API Key...</b>', { parse_mode: 'HTML' });
+
+    try {
+      const res = await axios.post(
+        'https://openrouter.ai/api/v1/chat/completions',
+        { model: 'openai/gpt-oss-20b:free', messages: [{ role: 'user', content: 'hi' }], max_tokens: 2 },
+        { 
+          headers: { 
+            'Authorization': `Bearer ${tempKey}`, 
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://examvault.app',
+            'X-Title': 'ExamVault Bot'
+          }, 
+          timeout: 8000 
+        }
+      );
+
+      if (res.data && res.data.choices) {
+        OPENROUTER_API_KEY = tempKey;
+        updateEnvFile('OPENROUTER_API_KEY', tempKey);
+        await bot.sendMessage(chatId,
+          `✅ <b>OpenRouter Key Verified & Saved!</b>\n\n🌐 <b>Free Models Active:</b> <code>openai/gpt-oss-20b:free</code>, <code>google/gemma-4-31b-it:free</code>\n🔑 Your key has been saved to .env and is ready to use!`,
+          { parse_mode: 'HTML', reply_markup: getMainKeyboard(chatId) }
+        );
+        updatePinnedTokenStatus(chatId, true).catch(() => {});
+      } else {
+        throw new Error('Unexpected response from OpenRouter API.');
+      }
+    } catch (e) {
+      const errMsg = e.response?.data?.error?.message || e.message || 'Unknown Error';
+      const isQuota = errMsg.toLowerCase().includes('rate-limited') || errMsg.toLowerCase().includes('quota') || e.response?.status === 429;
+      if (isQuota) {
+        OPENROUTER_API_KEY = tempKey;
+        updateEnvFile('OPENROUTER_API_KEY', tempKey);
+        await bot.sendMessage(chatId,
+          `⚠️ <b>OpenRouter Key Saved (Rate Limited)</b>\n\nYour key is valid, but free models are temporarily busy upstream. Key is saved!`,
+          { parse_mode: 'HTML', reply_markup: getMainKeyboard(chatId) }
+        );
+        updatePinnedTokenStatus(chatId, true).catch(() => {});
+      } else {
+        await bot.sendMessage(chatId,
+          `❌ <b>OpenRouter Key Invalid</b>\n\nReason: ${escapeHTML(errMsg)}\n\n💡 Get a free key at <a href="https://openrouter.ai/keys">openrouter.ai/keys</a>`,
+          { parse_mode: 'HTML' }
+        );
+      }
+    }
+    topicInput.delete(chatId);
+    return;
+  }
+
   if (input.step === 'update_openai_key') {
     const tempKey = msg.text.trim();
     bot.sendMessage(chatId, '🔍 <b>Testing OpenAI API Key...</b>', { parse_mode: 'HTML' });
@@ -4697,6 +4843,7 @@ Keep it strictly under 250 words, encouraging and clear!`;
       let report = `🔍 <b>Live Connection & Token Health Report</b>\n━━━━━━━━━━━━━━━━━━━━\n\n`;
       report += `• 🔵 <b>Gemini AI:</b> ${liveStatus.gemini.details}\n`;
       report += `• 🟣 <b>Groq (Llama 3.3):</b> ${liveStatus.groq.details}\n`;
+      report += `• 🌐 <b>OpenRouter:</b> ${liveStatus.openrouter.details}\n`;
       report += `• 🟢 <b>OpenAI:</b> ${liveStatus.openai.details}\n`;
       report += `• 📂 <b>Notion Vault:</b> ${liveStatus.notion.details}\n\n`;
       report += `📌 <i>Your pinned status dashboard message has been updated!</i>`;
@@ -4748,11 +4895,12 @@ Keep it strictly under 250 words, encouraging and clear!`;
       return;
     }
 
-    // Update Keys (Gemini, Groq, OpenAI, Notion, Bot Token)
-    if (['update_gemini_key', 'update_groq_key', 'update_openai_key', 'update_notion_key', 'update_notion_id', 'update_bot_token'].includes(data)) {
+    // Update Keys (Gemini, Groq, OpenRouter, OpenAI, Notion, Bot Token)
+    if (['update_gemini_key', 'update_groq_key', 'update_openrouter_key', 'update_openai_key', 'update_notion_key', 'update_notion_id', 'update_bot_token'].includes(data)) {
       const labelMap = {
         'update_gemini_key': 'Gemini API Key',
         'update_groq_key': 'Groq API Key (starts with gsk_...)',
+        'update_openrouter_key': 'OpenRouter API Key (starts with sk-or-v1-...)',
         'update_openai_key': 'OpenAI API Key',
         'update_notion_key': 'Notion API Key',
         'update_notion_id': 'Notion Parent ID',
