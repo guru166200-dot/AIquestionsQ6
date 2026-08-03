@@ -19,8 +19,8 @@ const http = require('http'); // Required for health checks on Render
 require('dotenv').config();
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const NOTION_KEY = process.env.NOTION_API_KEY;
-const NOTION_PARENT_DB = process.env.NOTION_PARENT_DB;
+let NOTION_KEY = process.env.NOTION_API_KEY;
+let NOTION_PARENT_DB = process.env.NOTION_PARENT_DB;
 let GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 let OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 let OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
@@ -772,25 +772,33 @@ async function getOrCreateSubPage(parentId, pageTitle, iconEmoji = '📁') {
  */
 async function saveAllQuestionsToNotion(exam, subject, topic, questions, chatId) {
   let statusMsg = null;
+  const activeKey = (process.env.NOTION_API_KEY || NOTION_KEY || '').trim();
+  const activeParentDb = (process.env.NOTION_PARENT_DB || NOTION_PARENT_DB || '').trim();
+
+  if (!activeKey || !activeParentDb) {
+    console.warn('[Notion Sync] Missing Notion API key or parent DB ID. Skipping Notion save.');
+    return null;
+  }
+
   try {
-    statusMsg = await bot.sendMessage(chatId, `💾 <b>Notion Vault Sync</b>\n━━━━━━━━━━━━━━━━━━━━\n⏳ <b>Initializing connection...</b>\n📂 <b>Path:</b> ${escapeHTML(exam)} ...`, { parse_mode: 'HTML' });
+    statusMsg = await bot.sendMessage(chatId, `💾 <b>Notion Vault Syncing...</b>\n━━━━━━━━━━━━━━━━━━━━\n⏳ <b>Initializing Vault Connection...</b>\n📂 <b>Path:</b> ${escapeHTML(exam)} ...`, { parse_mode: 'HTML' });
 
     // 1. Root -> Exam Folder (Official Icon)
-    await bot.editMessageText(`💾 <b>Notion Vault Sync</b>\n━━━━━━━━━━━━━━━━━━━━\n📂 🔐 <b>Opening Exam Vault: ${escapeHTML(exam)}</b>\n📂 <b>Path:</b> ${escapeHTML(exam)} › ...`, { chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'HTML' }).catch(() => { });
+    await bot.editMessageText(`💾 <b>Notion Vault Syncing...</b>\n━━━━━━━━━━━━━━━━━━━━\n📂 🔐 <b>Opening Exam Vault: ${escapeHTML(exam)}</b>\n📂 <b>Path:</b> ${escapeHTML(exam)} › ...`, { chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'HTML' }).catch(() => { });
 
-    const examIcon = EXAM_ICONS[exam]?.url || '🏛️';
-    const examPageId = await getOrCreateSubPage(NOTION_PARENT_DB, exam, examIcon);
+    const examIcon = EXAM_ICONS[exam]?.url || EXAM_ICONS[exam]?.icon || '🏛️';
+    const examPageId = await getOrCreateSubPage(activeParentDb, exam, examIcon);
 
     if (!examPageId) throw new Error('Exam folder creation failed');
 
     // 2. Exam -> Subject Folder (📚)
-    await bot.editMessageText(`💾 <b>Notion Vault Sync</b>\n━━━━━━━━━━━━━━━━━━━━\n📚 📂 <b>Accessing Subject: ${escapeHTML(subject)}</b>\n📂 <b>Path:</b> ${escapeHTML(exam)} › ${escapeHTML(subject)} › ...`, { chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'HTML' }).catch(() => { });
+    await bot.editMessageText(`💾 <b>Notion Vault Syncing...</b>\n━━━━━━━━━━━━━━━━━━━━\n📚 📂 <b>Accessing Subject: ${escapeHTML(subject)}</b>\n📂 <b>Path:</b> ${escapeHTML(exam)} › ${escapeHTML(subject)} › ...`, { chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'HTML' }).catch(() => { });
 
     const subjectPageId = await getOrCreateSubPage(examPageId, subject, '📚');
     if (!subjectPageId) throw new Error('Subject folder creation failed');
 
     // 3. Subject -> Topic Folder/Page (📝)
-    await bot.editMessageText(`💾 <b>Notion Vault Sync</b>\n━━━━━━━━━━━━━━━━━━━━\n📝 📂 <b>Preparing Topic: ${escapeHTML(topic)}</b>\n📂 <b>Path:</b> ${escapeHTML(exam)} › ${escapeHTML(subject)} › ${escapeHTML(topic)}`, { chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'HTML' }).catch(() => { });
+    await bot.editMessageText(`💾 <b>Notion Vault Syncing...</b>\n━━━━━━━━━━━━━━━━━━━━\n📝 📂 <b>Preparing Topic Page: ${escapeHTML(topic)}</b>\n📂 <b>Path:</b> ${escapeHTML(exam)} › ${escapeHTML(subject)} › ${escapeHTML(topic)}`, { chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'HTML' }).catch(() => { });
 
     const topicPageId = await getOrCreateSubPage(subjectPageId, topic, '📝');
 
@@ -805,12 +813,12 @@ async function saveAllQuestionsToNotion(exam, subject, topic, questions, chatId)
 
       while (hasMore) {
         const blocksRes = await axios.get(`https://api.notion.com/v1/blocks/${topicPageId}/children`, {
-          headers: { 'Authorization': `Bearer ${NOTION_KEY}`, 'Notion-Version': '2022-06-28' },
+          headers: { 'Authorization': `Bearer ${activeKey}`, 'Notion-Version': '2022-06-28' },
           params: { start_cursor: cursor }
         });
 
         existingQs += blocksRes.data.results.filter(b => {
-          if (b.type === 'heading_3') return true;
+          if (b.type === 'heading_3' || b.type === 'heading_2') return true;
           if (b.type === 'paragraph') {
             const text = b.paragraph?.rich_text?.[0]?.text?.content || '';
             return text.startsWith('Question ');
@@ -826,20 +834,26 @@ async function saveAllQuestionsToNotion(exam, subject, topic, questions, chatId)
       console.log('Error counting existing questions, starting from 1');
     }
 
-    // 5. Save Questions (Handling sets/contexts)
+    // 5. Save Questions (Handling sections & sets/contexts)
     let lastContext = null;
+    let lastSection = null;
     for (let i = 0; i < questions.length; i++) {
       const q = questions[i];
       const pct = Math.round(((i + 1) / questions.length) * 100);
 
       if (i % 2 === 0 || i === questions.length - 1) { // Throttled UI update
-        await bot.editMessageText(`💾 <b>Notion Vault Sync</b>\n━━━━━━━━━━━━━━━━━━━━\n✍️ <b>Writing Question ${i + 1}/${questions.length}</b>\n${getGlowProgressBar(pct)}\n\n📂 <b>Path:</b> ${escapeHTML(exam)} › ${escapeHTML(subject)} › ${escapeHTML(topic)}`, {
+        await bot.editMessageText(`💾 <b>Notion Vault Syncing...</b>\n━━━━━━━━━━━━━━━━━━━━\n✍️ <b>Writing Questions to Notion Vault (${i + 1}/${questions.length})</b>\n${getGlowProgressBar(pct)}\n\n📂 <b>Path:</b> ${escapeHTML(exam)} › ${escapeHTML(subject)} › ${escapeHTML(topic)}`, {
           chat_id: chatId,
           message_id: statusMsg.message_id,
           parse_mode: 'HTML'
         }).catch(() => { });
       }
 
+      // If section changes, save a section header block
+      if (q.sectionName && q.sectionName.trim() !== "" && q.sectionName !== lastSection) {
+        await saveSectionHeaderBlock(topicPageId, q.sectionName);
+        lastSection = q.sectionName;
+      }
 
       // If there's a new common context, save it as a divider/header
       if (q.context && q.context.trim() !== "" && q.context !== lastContext) {
@@ -851,24 +865,50 @@ async function saveAllQuestionsToNotion(exam, subject, topic, questions, chatId)
     }
 
     const notionUrl = `https://www.notion.so/${topicPageId.replace(/-/g, '')}`;
-    await bot.editMessageText(`✅ <b>Sync Complete!</b>\n━━━━━━━━━━━━━━━━━━━━\n🏆 <b>${questions.length} Questions Indexed</b>\n📂 <b>Path:</b> ${escapeHTML(exam)} › ${escapeHTML(subject)} › ${escapeHTML(topic)}\n\n🔗 <a href="${notionUrl}">View Topic in Notion</a>`, {
+    await bot.editMessageText(`✅ <b>Notion Sync Complete!</b>\n━━━━━━━━━━━━━━━━━━━━\n🏆 <b>${questions.length} Questions Saved & Indexed</b>\n📂 <b>Path:</b> ${escapeHTML(exam)} › ${escapeHTML(subject)} › ${escapeHTML(topic)}\n\n🔗 <a href="${notionUrl}">View Topic in Notion</a>`, {
       chat_id: chatId,
       message_id: statusMsg.message_id,
       parse_mode: 'HTML',
       disable_web_page_preview: true
     }).catch(() => {
-
-      bot.sendMessage(chatId, `✅ <b>Sync Complete!</b>\n\n🔗 <a href="${notionUrl}">View Topic in Notion</a>`, { parse_mode: 'HTML' });
+      bot.sendMessage(chatId, `✅ <b>Notion Sync Complete!</b>\n\n🔗 <a href="${notionUrl}">View Topic in Notion</a>`, { parse_mode: 'HTML' });
     });
 
-    console.log(`✅ Progress: All questions saved to Notion page ${topicPageId}`);
+    console.log(`✅ Progress: All ${questions.length} questions saved to Notion page ${topicPageId}`);
+    return notionUrl;
   } catch (error) {
     console.error('Notion Hierarchy Error:', error.message);
-    bot.sendMessage(chatId, `⚠️ Generate succeeded, but could not complete Notion save: ${error.message}`);
+    if (statusMsg) {
+      bot.editMessageText(`⚠️ Notion save status: ${error.message}\n\nQuestions were generated successfully!`, { chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'HTML' }).catch(() => {});
+    }
+    return null;
+  }
+}
+
+async function saveSectionHeaderBlock(topicPageId, sectionName) {
+  const currentKey = (process.env.NOTION_API_KEY || NOTION_KEY || '').trim();
+  try {
+    await axios.patch(`https://api.notion.com/v1/blocks/${topicPageId}/children`, {
+      children: [
+        {
+          object: 'block',
+          type: 'heading_2',
+          heading_2: {
+            rich_text: [{ type: 'text', text: { content: `📌 SECTION: ${sectionName}` } }],
+            color: 'purple_background'
+          }
+        }
+      ]
+    }, {
+      headers: { 'Authorization': `Bearer ${currentKey}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' }
+    });
+  } catch (e) {
+    console.error('Error saving section header block:', e.message);
   }
 }
 
 async function saveContextBlock(topicPageId, context) {
+  const currentKey = (process.env.NOTION_API_KEY || NOTION_KEY || '').trim();
   try {
     await axios.patch(`https://api.notion.com/v1/blocks/${topicPageId}/children`, {
       children: [
@@ -882,7 +922,7 @@ async function saveContextBlock(topicPageId, context) {
         }
       ]
     }, {
-      headers: { 'Authorization': `Bearer ${NOTION_KEY}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' }
+      headers: { 'Authorization': `Bearer ${currentKey}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' }
     });
 
   } catch (e) {
@@ -894,7 +934,7 @@ async function saveContextBlock(topicPageId, context) {
  * Save question blocks directly inside the Topic page
  */
 async function saveQuestionToNotion(topicPageId, question, questionIndex) {
-  const currentKey = NOTION_KEY;
+  const currentKey = (process.env.NOTION_API_KEY || NOTION_KEY || '').trim();
 
   try {
     await axios.patch(
@@ -1684,6 +1724,17 @@ async function startPyqSession(chatId, examKey, year) {
     };
 
     activeMockExams.set(chatId, session);
+
+    // Save PYQ paper questions to Notion Vault with progress animation & direct URL link
+    const pyqSubject = `Official PYQ Papers`;
+    const pyqTopic = `${catalog.name} ${year} Official PYQ Paper`;
+    saveAllQuestionsToNotion(catalog.name, pyqSubject, pyqTopic, allQuestions, chatId)
+      .then(notionUrl => {
+        if (notionUrl) session.notionUrl = notionUrl;
+      })
+      .catch(err => {
+        console.error('[PYQ Notion Sync Error]:', err.message);
+      });
 
     bot.editMessageText(
       `✅ <b>${escapeHTML(examTitle)}</b>\n━━━━━━━━━━━━━━━━━━━━\n` +
@@ -3821,6 +3872,23 @@ async function startMockOrPyqSession(chatId, patternKey, count = null, title = n
 
     activeMockExams.set(chatId, session);
 
+    // Save Full Mock / Express Mock / PYQ questions to Notion with saving animation & direct URL link
+    const dateStr = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const mockSubject = isPyq ? `Official PYQ Papers` : (isExpress ? `Express Mock Exams` : `Full Official Mock Exams`);
+    const mockTopic = title || (isPyq 
+      ? `${pattern.name} Official PYQ Paper`
+      : (isExpress 
+        ? `${pattern.name} — Express Mock (${dateStr})`
+        : `${pattern.name} — Full Official Mock Exam (${dateStr})`));
+
+    saveAllQuestionsToNotion(pattern.name, mockSubject, mockTopic, allQuestions, chatId)
+      .then(notionUrl => {
+        if (notionUrl) session.notionUrl = notionUrl;
+      })
+      .catch(err => {
+        console.error('[Mock Notion Sync Error]:', err.message);
+      });
+
     try {
       bot.deleteMessage(chatId, statusMsg.message_id).catch(() => {});
     } catch(e) {}
@@ -4014,8 +4082,11 @@ function finishMockExam(chatId, messageId) {
       `   • Qs: 🟢 ${s.correct} | 🔴 ${s.wrong} | ⚪ ${s.skipped} | Acc: <b>${secAcc}%</b>\n`;
   });
 
+  const vaultUrl = session.notionUrl || (NOTION_PARENT_DB ? `https://www.notion.so/${NOTION_PARENT_DB.replace(/-/g, '')}` : null);
+  const notionLink = vaultUrl ? `<a href="${vaultUrl}">View Paper in Notion Vault 🔗</a>` : `<i>Synced to Notion Vault!</i>`;
+
   text += `\n🤖 <b>AI Engine:</b> <code>${escapeHTML(session.modelUsed)}</code>\n` +
-    `<i>All questions synced to your Notion Vault!</i>`;
+    `📂 <b>Notion Sync:</b> ${notionLink}`;
 
   const keyboard = {
     inline_keyboard: [
