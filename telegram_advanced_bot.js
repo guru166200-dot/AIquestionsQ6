@@ -1581,117 +1581,125 @@ function showPyqYearMenu(chatId, examKey, messageId = null) {
  * Start a full PYQ session for a specific exam year
  */
 async function startPyqSession(chatId, examKey, year) {
-  const catalog = PYQ_EXAM_CATALOG[examKey];
-  if (!catalog) {
-    bot.sendMessage(chatId, '❌ Exam configuration not found.');
-    return;
-  }
-
-  const totalQs = catalog.sections.reduce((s, sec) => s + sec.questions, 0);
-  const examTitle = `${catalog.name} ${year} — Official PYQ Paper`;
-
-  const statusMsg = await bot.sendMessage(chatId,
-    `📑 <b>PYQ Paper Simulator Starting...</b>\n━━━━━━━━━━━━━━━━━━━━\n` +
-    `${catalog.icon} <b>${escapeHTML(examTitle)}</b>\n` +
-    `📊 Total: <b>${totalQs} Questions</b> | ${catalog.highlights.join(' | ')}\n` +
-    `🔍 Mode: <b>Year-Authentic PYQ Reconstruction</b>\n\n` +
-    `⏳ <i>Reconstructing ${year} official paper questions section by section...</i>`,
-    { parse_mode: 'HTML' }
-  );
-
-  let allQuestions = [];
-  let modelUsedSet = new Set();
-
-  for (let secIdx = 0; secIdx < catalog.sections.length; secIdx++) {
-    const updatePyqProgress = (inSecCount, secTargetQs, bNum, bTotal) => {
-      const currentOverall = completedQs + inSecCount;
-      const pct = Math.min(99, Math.round((currentOverall / totalQs) * 100));
-      bot.editMessageText(
-        `📑 <b>PYQ Paper Simulator</b>\n━━━━━━━━━━━━━━━━━━━━\n` +
-        `${catalog.icon} <b>${escapeHTML(examTitle)}</b>\n\n` +
-        `📌 <b>Section ${secIdx + 1}/${catalog.sections.length}:</b> ${escapeHTML(sec.name)}\n` +
-        `⚡ <b>Generating Set ${bNum}/${bTotal}</b> (${inSecCount}/${secTargetQs} Qs in section)\n\n` +
-        `${getGlowProgressBar(pct)}\n\n` +
-        `📊 <b>Overall Progress:</b> <code>${currentOverall}/${totalQs} Qs loaded (${pct}%)</code>\n` +
-        `<i>Matching ${year} exam style & current affairs...</i>`,
-        { chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'HTML' }
-      ).catch(() => {});
-    };
-
-    updatePyqProgress(0, sec.questions, 1, Math.ceil(sec.questions / 5));
-
-    let result = await generatePyqYearQuestions(examKey, year, sec.name, sec.subject, sec.questions, secIdx, updatePyqProgress);
-
-    if (!result || !result.questions || result.questions.length === 0) {
-      console.warn(`[PYQ] Specialized generator failed for ${sec.name}. Falling back to standard question generator...`);
-      result = await generateQuestions(sec.name, catalog.examKey, sec.subject, sec.questions, null, (inSecCount, secTargetQs, bNum, bTotal) => {
-        updatePyqProgress(inSecCount, secTargetQs, bNum, bTotal);
-      }, chatId);
-    }
-
-    if (!result || !result.questions || result.questions.length === 0) {
-      bot.editMessageText(
-        `❌ <b>Generation Failed!</b>\n\nCould not reconstruct questions for:\n<b>${escapeHTML(sec.name)}</b>\n\nPlease try again in a few moments.`,
-        { chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'HTML' }
-      ).catch(() => {});
+  try {
+    const catalog = PYQ_EXAM_CATALOG[examKey];
+    if (!catalog) {
+      bot.sendMessage(chatId, '❌ Exam configuration not found.');
       return;
     }
 
-    if (result.modelUsed) modelUsedSet.add(result.modelUsed);
+    const totalQs = catalog.sections.reduce((s, sec) => s + sec.questions, 0);
+    const examTitle = `${catalog.name} ${year} — Official PYQ Paper`;
 
-    result.questions.forEach((q) => {
-      allQuestions.push({
-        ...q,
-        sectionName: sec.name,
-        sectionIndex: secIdx,
-        positiveMarks: catalog.marking.positive,
-        negativeMarks: catalog.marking.negative,
-        subject: sec.subject,
-        pyqYear: year,
-        examKey: examKey
+    const statusMsg = await bot.sendMessage(chatId,
+      `📑 <b>PYQ Paper Simulator Starting...</b>\n━━━━━━━━━━━━━━━━━━━━\n` +
+      `${catalog.icon} <b>${escapeHTML(examTitle)}</b>\n` +
+      `📊 Total: <b>${totalQs} Questions</b> | ${catalog.highlights.join(' | ')}\n` +
+      `🔍 Mode: <b>Year-Authentic PYQ Reconstruction</b>\n\n` +
+      `⏳ <i>Reconstructing ${year} official paper questions section by section...</i>`,
+      { parse_mode: 'HTML' }
+    );
+
+    let allQuestions = [];
+    let modelUsedSet = new Set();
+    let completedQs = 0;
+
+    for (let secIdx = 0; secIdx < catalog.sections.length; secIdx++) {
+      const sec = catalog.sections[secIdx];
+      const updatePyqProgress = (inSecCount, secTargetQs, bNum, bTotal) => {
+        const currentOverall = completedQs + inSecCount;
+        const pct = Math.min(99, Math.round((currentOverall / totalQs) * 100));
+        bot.editMessageText(
+          `📑 <b>PYQ Paper Simulator</b>\n━━━━━━━━━━━━━━━━━━━━\n` +
+          `${catalog.icon} <b>${escapeHTML(examTitle)}</b>\n\n` +
+          `📌 <b>Section ${secIdx + 1}/${catalog.sections.length}:</b> ${escapeHTML(sec.name)}\n` +
+          `⚡ <b>Generating Set ${bNum}/${bTotal}</b> (${inSecCount}/${secTargetQs} Qs in section)\n\n` +
+          `${getGlowProgressBar(pct)}\n\n` +
+          `📊 <b>Overall Progress:</b> <code>${currentOverall}/${totalQs} Qs loaded (${pct}%)</code>\n` +
+          `<i>Matching ${year} exam style & current affairs...</i>`,
+          { chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'HTML' }
+        ).catch(() => {});
+      };
+
+      updatePyqProgress(0, sec.questions, 1, Math.ceil(sec.questions / 5));
+
+      let result = await generatePyqYearQuestions(examKey, year, sec.name, sec.subject, sec.questions, secIdx, updatePyqProgress);
+
+      if (!result || !result.questions || result.questions.length === 0) {
+        console.warn(`[PYQ] Specialized generator failed for ${sec.name}. Falling back to standard question generator...`);
+        result = await generateQuestions(sec.name, catalog.examKey, sec.subject, sec.questions, null, (inSecCount, secTargetQs, bNum, bTotal) => {
+          updatePyqProgress(inSecCount, secTargetQs, bNum, bTotal);
+        }, chatId);
+      }
+
+      if (!result || !result.questions || result.questions.length === 0) {
+        bot.editMessageText(
+          `❌ <b>Generation Failed!</b>\n\nCould not reconstruct questions for:\n<b>${escapeHTML(sec.name)}</b>\n\nPlease try again in a few moments.`,
+          { chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'HTML' }
+        ).catch(() => {});
+        return;
+      }
+
+      if (result.modelUsed) modelUsedSet.add(result.modelUsed);
+
+      result.questions.forEach((q) => {
+        allQuestions.push({
+          ...q,
+          sectionName: sec.name,
+          sectionIndex: secIdx,
+          positiveMarks: catalog.marking.positive,
+          negativeMarks: catalog.marking.negative,
+          subject: sec.subject,
+          pyqYear: year,
+          examKey: examKey
+        });
       });
+      completedQs += result.questions.length;
+    }
+
+    // Build session start indices
+    const sectionStartIndices = [];
+    let runningIdx = 0;
+    catalog.sections.forEach(sec => {
+      sectionStartIndices.push(runningIdx);
+      runningIdx += sec.questions;
     });
+
+    const session = {
+      patternKey: examKey,
+      pattern: { ...catalog, marking: catalog.marking, hasSectionalTimer: false, totalDuration: catalog.duration, durationMinutes: catalog.duration },
+      title: examTitle,
+      questions: allQuestions,
+      sections: catalog.sections,
+      sectionStartIndices,
+      current: 0,
+      currentSectionIndex: 0,
+      userAnswers: new Array(allQuestions.length).fill(null),
+      startTime: Date.now(),
+      sectionStartTimes: catalog.sections.map(() => Date.now()),
+      modelUsed: Array.from(modelUsedSet).join(', ') || 'PYQ AI Engine',
+      isPyq: true,
+      pyqYear: year,
+      isExpress: false
+    };
+
+    activeMockExams.set(chatId, session);
+
+    bot.editMessageText(
+      `✅ <b>${escapeHTML(examTitle)}</b>\n━━━━━━━━━━━━━━━━━━━━\n` +
+      `📊 <b>${totalQs} PYQ Questions</b> loaded!\n` +
+      `⏱️ Time Limit: <b>${catalog.duration} minutes</b>\n` +
+      `🔖 Marking: <b>${catalog.marking.positive > 0 ? '+' + catalog.marking.positive : catalog.marking.positive} Correct${catalog.marking.negative > 0 ? ' | -' + catalog.marking.negative.toFixed(2) + ' Wrong' : ' | No Negative'}</b>\n\n` +
+      `<i>Get ready! Your ${year} paper simulation begins now...</i>\n\n` +
+      `<b>📝 Starting Question 1...</b>`,
+      { chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'HTML' }
+    ).catch(() => {});
+
+    setTimeout(() => renderMockQuestion(chatId, null), 1500);
+  } catch (err) {
+    console.error(`[PYQ Error] startPyqSession failed:`, err);
+    bot.sendMessage(chatId, `❌ <b>PYQ Simulator Error:</b> ${escapeHTML(err.message || 'Unknown error occurred')}. Please try again.`, { parse_mode: 'HTML' });
   }
-
-  // Build session start indices
-  const sectionStartIndices = [];
-  let runningIdx = 0;
-  catalog.sections.forEach(sec => {
-    sectionStartIndices.push(runningIdx);
-    runningIdx += sec.questions;
-  });
-
-  const session = {
-    patternKey: examKey,
-    pattern: { ...catalog, marking: catalog.marking, hasSectionalTimer: false, totalDuration: catalog.duration },
-    title: examTitle,
-    questions: allQuestions,
-    sections: catalog.sections,
-    sectionStartIndices,
-    current: 0,
-    currentSectionIndex: 0,
-    userAnswers: new Array(allQuestions.length).fill(null),
-    startTime: Date.now(),
-    sectionStartTimes: catalog.sections.map(() => Date.now()),
-    modelUsed: Array.from(modelUsedSet).join(', ') || 'PYQ AI Engine',
-    isPyq: true,
-    pyqYear: year,
-    isExpress: false
-  };
-
-  activeMockExams.set(chatId, session);
-
-  bot.editMessageText(
-    `✅ <b>${escapeHTML(examTitle)}</b>\n━━━━━━━━━━━━━━━━━━━━\n` +
-    `📊 <b>${totalQs} PYQ Questions</b> loaded!\n` +
-    `⏱️ Time Limit: <b>${catalog.duration} minutes</b>\n` +
-    `🔖 Marking: <b>${catalog.marking.positive > 0 ? '+' + catalog.marking.positive : catalog.marking.positive} Correct${catalog.marking.negative > 0 ? ' | -' + catalog.marking.negative.toFixed(2) + ' Wrong' : ' | No Negative'}</b>\n\n` +
-    `<i>Get ready! Your ${year} paper simulation begins now...</i>\n\n` +
-    `<b>📝 Starting Question 1...</b>`,
-    { chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'HTML' }
-  ).catch(() => {});
-
-  setTimeout(() => renderMockQuestion(chatId, null), 1500);
 }
 
 // ==================== END PYQ ENGINE ====================
@@ -3154,6 +3162,7 @@ Keep response concise, engaging, and under 300 words.`;
         { contents: [{ parts: [{ text: prompt }] }] },
         { timeout: 30000 }
       );
+      replyText = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
       } catch (e) {
         const groqKey = process.env.GROQ_API_KEY;
         const openrouterKey = process.env.OPENROUTER_API_KEY || OPENROUTER_API_KEY;
@@ -3323,14 +3332,51 @@ Output JSON ONLY with format:
 }`;
 
   try {
-    const model = LAST_WORKING_GEMINI_MODEL || 'gemini-1.5-flash';
-    const res = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
-      { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: 'application/json' } },
-      { timeout: 30000 }
-    );
+    let rawResponse = null;
 
-    const parsed = JSON.parse(res.data.candidates[0].content.parts[0].text);
+    if (GEMINI_API_KEY) {
+      try {
+        const model = LAST_WORKING_GEMINI_MODEL || 'gemini-1.5-flash';
+        const res = await axios.post(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
+          { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: 'application/json' } },
+          { timeout: 30000 }
+        );
+        rawResponse = res.data.candidates?.[0]?.content?.parts?.[0]?.text;
+      } catch (gErr) {
+        console.warn('[Flashcards] Gemini failed:', gErr.message);
+      }
+    }
+
+    if (!rawResponse) {
+      const openrouterKey = process.env.OPENROUTER_API_KEY || OPENROUTER_API_KEY;
+      if (openrouterKey) {
+        try {
+          const resp = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
+            model: 'openai/gpt-oss-20b:free',
+            response_format: { type: 'json_object' },
+            messages: [{ role: 'user', content: prompt }]
+          }, {
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${openrouterKey}`,
+              'HTTP-Referer': 'https://examvault.app',
+              'X-Title': 'ExamVault Bot'
+            },
+            timeout: 30000
+          });
+          rawResponse = resp.data.choices?.[0]?.message?.content;
+        } catch (orErr) {
+          console.warn('[Flashcards] OpenRouter fallback failed:', orErr.message);
+        }
+      }
+    }
+
+    const parsed = safeParseJSON(rawResponse);
+    if (!parsed || !parsed.flashcards || parsed.flashcards.length === 0) {
+      throw new Error('AI Engine did not return valid flashcards JSON.');
+    }
+
     const newCards = parsed.flashcards || [];
 
     const existing = userFlashcards.get(chatId) || [];
@@ -3654,128 +3700,136 @@ function showPyqMenu(chatId, messageId = null) {
 }
 
 async function startMockOrPyqSession(chatId, patternKey, count = null, title = null, isPyq = false, isExpress = false) {
-  // Normalize legacy keys
-  let key = patternKey;
-  if (key === 'SSC') key = 'SSC_CGL';
-  if (key === 'RRB') key = 'RRB_NTPC';
-  if (key === 'TNPSC') key = 'TNPSC_GROUP1';
-  if (key === 'Bank' || key === 'BANK') key = 'BANK_PRELIMS';
-  if (key === 'JE') key = 'RRB_JE_CBT1';
+  try {
+    // Normalize legacy keys
+    let key = patternKey;
+    if (key === 'SSC') key = 'SSC_CGL';
+    if (key === 'RRB') key = 'RRB_NTPC';
+    if (key === 'TNPSC') key = 'TNPSC_GROUP1';
+    if (key === 'Bank' || key === 'BANK') key = 'BANK_PRELIMS';
+    if (key === 'JE') key = 'RRB_JE_CBT1';
 
-  const pattern = MOCK_EXAM_PATTERNS[key] || MOCK_EXAM_PATTERNS['SSC_CGL'];
-  const activeSections = isExpress ? pattern.expressScale : pattern.sections;
-  const examTitle = title || (isExpress ? `${pattern.name} — ⚡ Express Practice Mock` : `${pattern.name} — 🏆 Full Official Mock Exam`);
+    const pattern = MOCK_EXAM_PATTERNS[key] || MOCK_EXAM_PATTERNS['SSC_CGL'];
+    const activeSections = isExpress ? pattern.expressScale : pattern.sections;
+    const examTitle = title || (isExpress ? `${pattern.name} — ⚡ Express Practice Mock` : `${pattern.name} — 🏆 Full Official Mock Exam`);
 
-  const totalQs = activeSections.reduce((s, sec) => s + sec.questions, 0);
+    const totalQs = activeSections.reduce((s, sec) => s + sec.questions, 0);
 
-  const statusMsg = await bot.sendMessage(chatId,
-    `🚀 <b>ExamVault Official Mock Exam Engine</b>\n━━━━━━━━━━━━━━━━━━━━\n` +
-    `📋 <b>${escapeHTML(examTitle)}</b>\n` +
-    `📊 Total: <b>${totalQs} Questions</b> across <b>${activeSections.length} Sections</b>\n` +
-    `🔬 Mode: <b>${isExpress ? '⚡ Express' : '🏆 Full Official'}</b> | Engine: <b>${isExpress ? 'Standard AI' : '🔴 Ultra-Strict Mock AI'}</b>\n\n` +
-    `⏳ <i>Generating section-wise exam-standard questions...</i>`,
-    { parse_mode: 'HTML' }
-  );
+    const statusMsg = await bot.sendMessage(chatId,
+      `🚀 <b>ExamVault Official Mock Exam Engine</b>\n━━━━━━━━━━━━━━━━━━━━\n` +
+      `📋 <b>${escapeHTML(examTitle)}</b>\n` +
+      `📊 Total: <b>${totalQs} Questions</b> across <b>${activeSections.length} Sections</b>\n` +
+      `🔬 Mode: <b>${isExpress ? '⚡ Express' : '🏆 Full Official'}</b> | Engine: <b>${isExpress ? 'Standard AI' : '🔴 Ultra-Strict Mock AI'}</b>\n\n` +
+      `⏳ <i>Generating section-wise exam-standard questions...</i>`,
+      { parse_mode: 'HTML' }
+    );
 
-  let allQuestions = [];
-  let modelUsedSet = new Set();
+    let allQuestions = [];
+    let modelUsedSet = new Set();
+    let completedQs = 0;
 
-  for (let secIdx = 0; secIdx < activeSections.length; secIdx++) {
-    const updateMockProgress = (inSecCount, secTargetQs, bNum, bTotal) => {
-      const currentOverall = completedQs + inSecCount;
-      const pct = Math.min(99, Math.round((currentOverall / totalQs) * 100));
-      bot.editMessageText(
-        `🚀 <b>ExamVault Official Mock Exam Engine</b>\n━━━━━━━━━━━━━━━━━━━━\n` +
-        `📋 <b>${escapeHTML(examTitle)}</b>\n\n` +
-        `📌 <b>Section ${secIdx + 1}/${activeSections.length}:</b> ${escapeHTML(sec.name)}\n` +
-        `⚡ <b>Generating Set ${bNum}/${bTotal}</b> (${inSecCount}/${secTargetQs} Qs in section)\n\n` +
-        `${getGlowProgressBar(pct)}\n\n` +
-        `📊 <b>Overall Progress:</b> <code>${currentOverall}/${totalQs} Qs loaded (${pct}%)</code>\n` +
-        `<i>🔴 Full mock uses real-exam-level difficulty prompts...</i>`,
-        { chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'HTML' }
-      ).catch(() => {});
+    for (let secIdx = 0; secIdx < activeSections.length; secIdx++) {
+      const sec = activeSections[secIdx];
+      const updateMockProgress = (inSecCount, secTargetQs, bNum, bTotal) => {
+        const currentOverall = completedQs + inSecCount;
+        const pct = Math.min(99, Math.round((currentOverall / totalQs) * 100));
+        bot.editMessageText(
+          `🚀 <b>ExamVault Official Mock Exam Engine</b>\n━━━━━━━━━━━━━━━━━━━━\n` +
+          `📋 <b>${escapeHTML(examTitle)}</b>\n\n` +
+          `📌 <b>Section ${secIdx + 1}/${activeSections.length}:</b> ${escapeHTML(sec.name)}\n` +
+          `⚡ <b>Generating Set ${bNum}/${bTotal}</b> (${inSecCount}/${secTargetQs} Qs in section)\n\n` +
+          `${getGlowProgressBar(pct)}\n\n` +
+          `📊 <b>Overall Progress:</b> <code>${currentOverall}/${totalQs} Qs loaded (${pct}%)</code>\n` +
+          `<i>🔴 Full mock uses real-exam-level difficulty prompts...</i>`,
+          { chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'HTML' }
+        ).catch(() => {});
+      };
+
+      updateMockProgress(0, sec.questions, 1, Math.ceil(sec.questions / 5));
+
+      let result = null;
+
+      if (!isExpress && !isPyq) {
+        // ✅ FULL MOCK — Use ultra-strict dedicated mock exam prompt engine
+        result = await generateMockSectionQuestions(
+          pattern.examKey,
+          sec.name,
+          sec.subject,
+          sec.questions,
+          pattern.marking,
+          secIdx,
+          updateMockProgress
+        );
+      }
+
+      if (!result || !result.questions || result.questions.length === 0) {
+        // ⚡ FALLBACK: If specialized generator failed, try standard generator
+        console.warn(`[MockGen] Specialized generator failed for ${sec.name}. Falling back to standard question generator...`);
+        result = await generateQuestions(sec.name, pattern.examKey, sec.subject, sec.questions, null, (inSecCount, secTargetQs, bNum, bTotal) => {
+          updateMockProgress(inSecCount, secTargetQs, bNum, bTotal);
+        }, chatId);
+      }
+
+      if (!result || !result.questions || result.questions.length === 0) {
+        bot.editMessageText(
+          `❌ <b>Generation Failed!</b>\n\nFailed to generate questions for section:\n<b>${escapeHTML(sec.name)}</b>\n\nPlease try again or switch to ⚡ Express mode.`,
+          { chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'HTML' }
+        ).catch(() => {});
+        bot.sendMessage(chatId, `⬅️ <b>Mock Session Cancelled.</b>`, { parse_mode: 'HTML', reply_markup: getMainKeyboard(chatId) });
+        return;
+      }
+
+      if (result.modelUsed) modelUsedSet.add(result.modelUsed);
+
+      result.questions.forEach((q) => {
+        allQuestions.push({
+          ...q,
+          sectionName: sec.name,
+          sectionIndex: secIdx,
+          positiveMarks: pattern.marking.positive,
+          negativeMarks: pattern.marking.negative,
+          subject: sec.subject
+        });
+      });
+      completedQs += result.questions.length;
+    }
+
+    // Calculate section start indices
+    const sectionStartIndices = [];
+    let runningIdx = 0;
+    activeSections.forEach(sec => {
+      sectionStartIndices.push(runningIdx);
+      runningIdx += sec.questions;
+    });
+
+    const session = {
+      patternKey: key,
+      pattern,
+      title: examTitle,
+      questions: allQuestions,
+      sections: activeSections,
+      sectionStartIndices,
+      current: 0,
+      currentSectionIndex: 0,
+      userAnswers: new Array(allQuestions.length).fill(null),
+      startTime: Date.now(),
+      sectionStartTimes: activeSections.map(() => Date.now()),
+      modelUsed: Array.from(modelUsedSet).join(', ') || 'Standard AI Engine',
+      isPyq,
+      isExpress
     };
 
-    updateMockProgress(0, sec.questions, 1, Math.ceil(sec.questions / 5));
+    activeMockExams.set(chatId, session);
 
-    let result = null;
+    try {
+      bot.deleteMessage(chatId, statusMsg.message_id).catch(() => {});
+    } catch(e) {}
 
-    if (!isExpress && !isPyq) {
-      // ✅ FULL MOCK — Use ultra-strict dedicated mock exam prompt engine
-      result = await generateMockSectionQuestions(
-        pattern.examKey,
-        sec.name,
-        sec.subject,
-        sec.questions,
-        pattern.marking,
-        secIdx,
-        updateMockProgress
-      );
-    }
-
-    if (!result || !result.questions || result.questions.length === 0) {
-      // ⚡ FALLBACK: If specialized generator failed, try standard generator
-      console.warn(`[MockGen] Specialized generator failed for ${sec.name}. Falling back to standard question generator...`);
-      result = await generateQuestions(sec.name, pattern.examKey, sec.subject, sec.questions, null, (inSecCount, secTargetQs, bNum, bTotal) => {
-        updateMockProgress(inSecCount, secTargetQs, bNum, bTotal);
-      }, chatId);
-    }
-
-    if (!result || !result.questions || result.questions.length === 0) {
-      bot.editMessageText(
-        `❌ <b>Generation Failed!</b>\n\nFailed to generate questions for section:\n<b>${escapeHTML(sec.name)}</b>\n\nPlease try again or switch to ⚡ Express mode.`,
-        { chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'HTML' }
-      ).catch(() => {});
-      bot.sendMessage(chatId, `⬅️ <b>Mock Session Cancelled.</b>`, { parse_mode: 'HTML', reply_markup: getMainKeyboard(chatId) });
-      return;
-    }
-
-    if (result.modelUsed) modelUsedSet.add(result.modelUsed);
-
-    result.questions.forEach((q) => {
-      allQuestions.push({
-        ...q,
-        sectionName: sec.name,
-        sectionIndex: secIdx,
-        positiveMarks: pattern.marking.positive,
-        negativeMarks: pattern.marking.negative,
-        subject: sec.subject
-      });
-    });
+    renderMockQuestion(chatId);
+  } catch (err) {
+    console.error(`[Mock Session Error] startMockOrPyqSession failed:`, err);
+    bot.sendMessage(chatId, `❌ <b>Mock Exam Error:</b> ${escapeHTML(err.message || 'Unknown error occurred')}. Please try again.`, { parse_mode: 'HTML' });
   }
-
-  // Calculate section start indices
-  const sectionStartIndices = [];
-  let runningIdx = 0;
-  activeSections.forEach(sec => {
-    sectionStartIndices.push(runningIdx);
-    runningIdx += sec.questions;
-  });
-
-  const session = {
-    patternKey: key,
-    pattern,
-    title: examTitle,
-    questions: allQuestions,
-    sections: activeSections,
-    sectionStartIndices,
-    current: 0,
-    currentSectionIndex: 0,
-    userAnswers: new Array(allQuestions.length).fill(null),
-    startTime: Date.now(),
-    sectionStartTimes: activeSections.map(() => Date.now()),
-    modelUsed,
-    isPyq,
-    isExpress
-  };
-
-  activeMockExams.set(chatId, session);
-
-  try {
-    bot.deleteMessage(chatId, statusMsg.message_id).catch(() => {});
-  } catch(e) {}
-
-  renderMockQuestion(chatId);
 }
 
 function renderMockQuestion(chatId, messageId = null) {
@@ -3798,7 +3852,8 @@ function renderMockQuestion(chatId, messageId = null) {
 
   // Calculate overall timer
   const totalElapsedSec = Math.round((Date.now() - session.startTime) / 1000);
-  const maxTotalSec = (session.isExpress ? Math.round(pattern.durationMinutes * 0.25) : pattern.durationMinutes) * 60;
+  const durationMins = pattern.durationMinutes || pattern.duration || 60;
+  const maxTotalSec = (session.isExpress ? Math.round(durationMins * 0.25) : durationMins) * 60;
   const overallRemainingSec = Math.max(0, maxTotalSec - totalElapsedSec);
   const overallMin = Math.floor(overallRemainingSec / 60);
   const overallSec = overallRemainingSec % 60;
@@ -3932,7 +3987,7 @@ function finishMockExam(chatId, messageId) {
   const overallAccuracy = totalAttempted > 0 ? Math.round((totalCorrect / totalAttempted) * 100) : 0;
 
   // Cutoff evaluation
-  const cutoffTarget = session.isExpress ? Math.round(pattern.cutoffEstimate * 0.25) : pattern.cutoffEstimate;
+  const cutoffTarget = pattern.cutoffEstimate ? (session.isExpress ? Math.round(pattern.cutoffEstimate * 0.25) : pattern.cutoffEstimate) : Math.round(maxPossibleMarks * 0.6);
   const isQualified = netTotalMarks >= cutoffTarget;
   const cutoffStatus = isQualified ? '🟢 <b>QUALIFIED</b>' : '🟡 <b>NEEDS FOCUS</b>';
 
