@@ -3992,6 +3992,7 @@ bot.onText(/\/start/, async (msg) => {
 <b>🤖 Live AI Model & Token Status:</b>
 • 🔵 <b>Gemini:</b> ${status.gemini.details}
 • 🟣 <b>Groq (Llama 3.3):</b> ${status.groq.details}
+• 🌐 <b>OpenRouter:</b> ${status.openrouter.details}
 • 🟢 <b>OpenAI:</b> ${status.openai.details}
 • 📂 <b>Notion Vault:</b> ${status.notion.details}
 
