@@ -1027,6 +1027,187 @@ async function saveQuestionToNotion(topicPageId, question, questionIndex) {
 
 // ==================== AI QUESTION GENERATION ====================
 
+/**
+ * Sanitizes, validates, and normalizes AI-generated question objects.
+ * - Strips option letter prefixes (e.g., "A) ", "A. ", "(A) ", "Option A: ") from optionA..optionD.
+ * - Normalizes correctAnswer to a single uppercase letter ('A', 'B', 'C', or 'D').
+ * - Verifies correctAnswer against explanation to fix LLM mismatches.
+ * - Ensures option completeness and handles duplicate options.
+ */
+function sanitizeAndValidateQuestions(questions) {
+  if (!Array.isArray(questions)) return [];
+
+  const cleanedQuestions = [];
+
+  for (let q of questions) {
+    if (!q || typeof q !== 'object') continue;
+
+    // Helper to strip option prefixes
+    const cleanOption = (text, letter) => {
+      if (text === undefined || text === null) return '';
+      let str = String(text).trim();
+      // Remove prefixes like "Option A:", "Option A)", "Option A.", "A)", "A.", "(A)", "a)", "a.", "(a)"
+      const prefixRegex = new RegExp(`^(?:option\\s*${letter}[\\.\\)\\:\\-]?|[${letter.toLowerCase()}${letter.toUpperCase()}][\\.\\)\\:\\-]|\\([${letter.toLowerCase()}${letter.toUpperCase()}]\\))\\s*`, 'i');
+      str = str.replace(prefixRegex, '').trim();
+      // Remove generic prefixes like "1)", "(1)", "1.", "Option 1"
+      const genericRegex = /^(?:option\\s*[1-4][\\.\\)\\:\\-]?|[1-4][\\.\\)\\:]|\\([1-4]\\))\\s*/i;
+      str = str.replace(genericRegex, '').trim();
+      return str;
+    };
+
+    let optA = cleanOption(q.optionA, 'A');
+    let optB = cleanOption(q.optionB, 'B');
+    let optC = cleanOption(q.optionC, 'C');
+    let optD = cleanOption(q.optionD, 'D');
+
+    // Skip if all options are empty
+    if (!optA && !optB && !optC && !optD) continue;
+
+    // Normalize correctAnswer
+    let rawAns = String(q.correctAnswer || '').trim();
+    let ans = '';
+
+    const ansLower = rawAns.toLowerCase();
+    if (ansLower === 'a' || ansLower === 'optiona' || ansLower === 'option a' || ansLower === 'a)' || ansLower === 'a.' || ansLower === '(a)' || ansLower === '1' || ansLower === 'option 1') {
+      ans = 'A';
+    } else if (ansLower === 'b' || ansLower === 'optionb' || ansLower === 'option b' || ansLower === 'b)' || ansLower === 'b.' || ansLower === '(b)' || ansLower === '2' || ansLower === 'option 2') {
+      ans = 'B';
+    } else if (ansLower === 'c' || ansLower === 'optionc' || ansLower === 'option c' || ansLower === 'c)' || ansLower === 'c.' || ansLower === '(c)' || ansLower === '3' || ansLower === 'option 3') {
+      ans = 'C';
+    } else if (ansLower === 'd' || ansLower === 'optiond' || ansLower === 'option d' || ansLower === 'd)' || ansLower === 'd.' || ansLower === '(d)' || ansLower === '4' || ansLower === 'option 4') {
+      ans = 'D';
+    } else if (rawAns.length === 1 && ['A', 'B', 'C', 'D'].includes(rawAns.toUpperCase())) {
+      ans = rawAns.toUpperCase();
+    } else {
+      // Check if rawAns equals or contains text of one of the options
+      const normalizeText = (t) => t.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const rawNorm = normalizeText(rawAns);
+      if (rawNorm && optA && (normalizeText(optA) === rawNorm || normalizeText(optA).includes(rawNorm) || rawNorm.includes(normalizeText(optA)))) ans = 'A';
+      else if (rawNorm && optB && (normalizeText(optB) === rawNorm || normalizeText(optB).includes(rawNorm) || rawNorm.includes(normalizeText(optB)))) ans = 'B';
+      else if (rawNorm && optC && (normalizeText(optC) === rawNorm || normalizeText(optC).includes(rawNorm) || rawNorm.includes(normalizeText(optC)))) ans = 'C';
+      else if (rawNorm && optD && (normalizeText(optD) === rawNorm || normalizeText(optD).includes(rawNorm) || rawNorm.includes(normalizeText(optD)))) ans = 'D';
+    }
+
+    // Explanation cross-check for accuracy & Right Answer Presence Enforcement
+    const exp = String(q.explanation || '');
+    if (exp) {
+      const expMatch = exp.match(/✅\s*Correct\s*:?\s*\(?([A-D])\)?/i) ||
+                       exp.match(/Option\s+([A-D])\s+is\s+(?:the\s+)?correct/i) ||
+                       exp.match(/Correct\s+Answer\s*(?:is|:)\s*\(?([A-D])\)?/i) ||
+                       exp.match(/Answer\s*(?:is|:)\s*\(?([A-D])\)?/i);
+      if (expMatch && expMatch[1]) {
+        const expAns = expMatch[1].toUpperCase();
+        if (['A', 'B', 'C', 'D'].includes(expAns)) {
+          if (!ans || ans !== expAns) {
+            console.log(`[Sanitizer] Re-aligned correctAnswer from '${ans}' to '${expAns}' based on explanation context.`);
+            ans = expAns;
+          }
+        }
+      }
+
+      // Guarantee right answer exists among options:
+      // If explanation states the explicit correct value (e.g. "Canberra" or "210"), ensure it is in options
+      const valMatch = exp.match(/✅\s*Correct\s*:?\s*(?:[A-D][\)\.\:\-]\s*)?([^.\n❌;]+)/i) ||
+                       exp.match(/(?:The\s+)?correct\s+answer\s+(?:is|:)\s*(?:[A-D][\)\.\:\-]\s*)?([^.\n❌;]+)/i);
+      if (valMatch && valMatch[1]) {
+        let explicitVal = valMatch[1].replace(/^(?:option\s*[a-d]|is)\s*/i, '').trim();
+        explicitVal = explicitVal.split(/\s+(?:is|was|were|are|which|because)\b/i)[0].trim();
+
+        if (explicitVal && explicitVal.length > 0 && explicitVal.length < 100) {
+          const normalizeText = (t) => t.toLowerCase().replace(/[^a-z0-9]/g, '');
+          const targetNorm = normalizeText(explicitVal);
+
+          if (targetNorm.length > 0) {
+            let foundLetter = null;
+            if (optA && (normalizeText(optA).includes(targetNorm) || targetNorm.includes(normalizeText(optA)))) foundLetter = 'A';
+            else if (optB && (normalizeText(optB).includes(targetNorm) || targetNorm.includes(normalizeText(optB)))) foundLetter = 'B';
+            else if (optC && (normalizeText(optC).includes(targetNorm) || targetNorm.includes(normalizeText(optC)))) foundLetter = 'C';
+            else if (optD && (normalizeText(optD).includes(targetNorm) || targetNorm.includes(normalizeText(optD)))) foundLetter = 'D';
+
+            if (foundLetter) {
+              ans = foundLetter;
+            } else {
+              // Right answer was missing from all 4 options! Inject explicitVal into the correctAnswer option slot!
+              console.log(`[Sanitizer] Injected missing right answer '${explicitVal}' into option${ans}`);
+              if (ans === 'A') optA = explicitVal;
+              else if (ans === 'B') optB = explicitVal;
+              else if (ans === 'C') optC = explicitVal;
+              else if (ans === 'D') optD = explicitVal;
+            }
+          }
+        }
+      }
+    }
+
+    if (!ans) ans = 'A'; // Final fallback
+
+    // Ensure non-empty options
+    if (!optA) optA = 'Option A';
+    if (!optB) optB = 'Option B';
+    if (!optC) optC = 'Option C';
+    if (!optD) optD = 'Option D';
+
+    // Disambiguate duplicates if any option texts are identical
+    if (optA === optB) optB += ' (Variant)';
+    if (optC === optD || optC === optA || optC === optB) optC += ' (Variant)';
+    if (optD === optA || optD === optB || optD === optC) optD += ' (Variant)';
+
+    cleanedQuestions.push({
+      ...q,
+      question: String(q.question || '').trim(),
+      optionA: optA,
+      optionB: optB,
+      optionC: optC,
+      optionD: optD,
+      correctAnswer: ans,
+      explanation: String(q.explanation || '').trim()
+    });
+  }
+
+  return cleanedQuestions;
+}
+
+/**
+ * Robust JSON parser that strips markdown fences (```json ... ```), extracts clean JSON objects,
+ * sanitizes and validates question options/answers, and recovers from minor LLM formatting glitches.
+ */
+function safeParseJSON(rawText) {
+  if (!rawText || typeof rawText !== 'string') return null;
+  let text = rawText.trim();
+  let parsedObj = null;
+
+  // Try direct parse first
+  try {
+    parsedObj = JSON.parse(text);
+  } catch (e) {}
+
+  // Strip markdown code fences if present
+  if (!parsedObj && text.includes('```')) {
+    text = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+    try {
+      parsedObj = JSON.parse(text);
+    } catch (e) {}
+  }
+
+  // Extract outer braces {}
+  if (!parsedObj) {
+    const firstBrace = text.indexOf('{');
+    const lastBrace = text.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace > firstBrace) {
+      const extracted = text.substring(firstBrace, lastBrace + 1);
+      try {
+        parsedObj = JSON.parse(extracted);
+      } catch (e) {}
+    }
+  }
+
+  if (parsedObj && Array.isArray(parsedObj.questions)) {
+    parsedObj.questions = sanitizeAndValidateQuestions(parsedObj.questions);
+  }
+
+  return parsedObj;
+}
+
 function isBankSetBasedHelper(exam, topic) {
   if (exam !== 'Bank' || !topic) return false;
   const t = topic.toLowerCase();
@@ -1050,39 +1231,6 @@ function isBankSetBasedHelper(exam, topic) {
   );
 }
 
-/**
- * Robust JSON parser that strips markdown fences (```json ... ```), extracts clean JSON objects,
- * and recovers from minor LLM formatting glitches.
- */
-function safeParseJSON(rawText) {
-  if (!rawText || typeof rawText !== 'string') return null;
-  let text = rawText.trim();
-
-  // Try direct parse first
-  try {
-    return JSON.parse(text);
-  } catch (e) {}
-
-  // Strip markdown code fences if present
-  if (text.includes('```')) {
-    text = text.replace(/```json/gi, '').replace(/```/g, '').trim();
-    try {
-      return JSON.parse(text);
-    } catch (e) {}
-  }
-
-  // Extract outer braces {}
-  const firstBrace = text.indexOf('{');
-  const lastBrace = text.lastIndexOf('}');
-  if (firstBrace !== -1 && lastBrace > firstBrace) {
-    const extracted = text.substring(firstBrace, lastBrace + 1);
-    try {
-      return JSON.parse(extracted);
-    } catch (e) {}
-  }
-
-  return null;
-}
 
 // ==================== PYQ (PREVIOUS YEAR QUESTIONS) ENGINE ====================
 // Auto-updating year range: 2010 → current year. No manual update needed.
@@ -1344,16 +1492,23 @@ ABSOLUTE QUALITY MANDATES:
 ✓ REQUIRED: For Assertion-Reason: use exact standard 4-option format
 ✓ REQUIRED: For Statement-type: use exactly 3 statements with "1 only / 2 and 3 only / 1 and 3 only / All of the above"
 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STRICT OPTION & CORRECT ANSWER FORMATTING RULES:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. DO NOT include prefixes like "A)", "B)", "A.", "B.", "(A)", "(B)", or "Option A:" in optionA, optionB, optionC, optionD fields. Write ONLY the clean option text.
+2. "correctAnswer" MUST be EXACTLY ONE UPPERCASE LETTER: "A", "B", "C", or "D". DO NOT write "Option A", "A)", "a", or the full text.
+3. DOUBLE CHECK ACCURACY: The letter in "correctAnswer" MUST point to the EXACT option key (optionA/B/C/D) containing the correct fact AND MUST MATCH the explanation!
+
 OUTPUT FORMAT — STRICT JSON ONLY. No markdown. Start with { immediately.
 {
   "questions": [
     {
       "type": "Direct|Year|Statement|Assertion-Reason|Match|Chronological|Arithmetic|Numerical|Puzzle|Comprehension",
       "question": "Full question text as it appeared in official ${examCatalog.name} ${year} paper",
-      "optionA": "Trap-worthy plausible option A",
-      "optionB": "Trap-worthy plausible option B",
-      "optionC": "Trap-worthy plausible option C",
-      "optionD": "Trap-worthy plausible option D",
+      "optionA": "Clean plausible option A (NO 'A)' prefix)",
+      "optionB": "Clean plausible option B (NO 'B)' prefix)",
+      "optionC": "Clean plausible option C (NO 'C)' prefix)",
+      "optionD": "Clean plausible option D (NO 'D)' prefix)",
       "correctAnswer": "A|B|C|D",
       "explanation": "✅ Correct: [full reason]. ❌ A wrong: [why]. ❌ B wrong: [why]. ❌ C wrong: [why]. ❌ D wrong: [why].",
       "difficulty": "Easy|Moderate|Hard",
@@ -1886,6 +2041,13 @@ ABSOLUTE QUALITY MANDATES (ZERO TOLERANCE):
 ✓ REQUIRED: Every question must contribute to exam readiness — no filler, no repetition
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STRICT OPTION & CORRECT ANSWER FORMATTING RULES:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. DO NOT include prefixes like "A)", "B)", "A.", "B.", "(A)", "(B)", or "Option A:" in optionA, optionB, optionC, optionD fields. Write ONLY the clean option text.
+2. "correctAnswer" MUST be EXACTLY ONE UPPERCASE LETTER: "A", "B", "C", or "D". DO NOT write "Option A", "A)", "a", or the full text.
+3. DOUBLE CHECK ACCURACY: The letter in "correctAnswer" MUST point to the EXACT option key (optionA/B/C/D) containing the correct fact AND MUST MATCH the explanation!
+
 OUTPUT FORMAT — STRICT JSON ONLY. NO markdown. START with { immediately.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {
@@ -1893,10 +2055,10 @@ OUTPUT FORMAT — STRICT JSON ONLY. NO markdown. START with { immediately.
     {
       "type": "Direct|Year|Statement|Assertion-Reason|Match|Chronological|Arithmetic|Numerical|Puzzle|Comprehension",
       "question": "Complete question text exactly as it would appear in an official ${exam} paper",
-      "optionA": "Plausible and trap-worthy option A",
-      "optionB": "Plausible and trap-worthy option B",
-      "optionC": "Plausible and trap-worthy option C",
-      "optionD": "Plausible and trap-worthy option D",
+      "optionA": "Clean plausible option A (NO 'A)' prefix)",
+      "optionB": "Clean plausible option B (NO 'B)' prefix)",
+      "optionC": "Clean plausible option C (NO 'C)' prefix)",
+      "optionD": "Clean plausible option D (NO 'D)' prefix)",
       "correctAnswer": "A|B|C|D",
       "explanation": "✅ Correct: [full reason why this is right]. ❌ A wrong: [why]. ❌ B wrong: [why]. ❌ C wrong: [why]. ❌ D wrong: [why].",
       "difficulty": "Easy|Moderate|Hard",
@@ -2268,6 +2430,12 @@ A) [Value]  B) [Value]  C) [Value]  D) [Value]
 ╔══════════════════════════════════════════╗
 ║  BANK STANDARD EXAM QUESTIONS          ║
 ╚══════════════════════════════════════════╝
+STRICT OPTION & CORRECT ANSWER FORMATTING RULES:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. DO NOT include prefixes like "A)", "B)", "A.", "B.", "(A)", "(B)", or "Option A:" in optionA, optionB, optionC, optionD fields. Write ONLY the clean option text.
+2. "correctAnswer" MUST be EXACTLY ONE UPPERCASE LETTER: "A", "B", "C", or "D". DO NOT write "Option A", "A)", "a", or the full text.
+3. DOUBLE CHECK ACCURACY: The letter in "correctAnswer" MUST point to the EXACT option key (optionA/B/C/D) containing the correct fact AND MUST MATCH the explanation!
+
 For this Bank subject (${subject}), generate questions strictly following the latest IBPS/SBI pattern.
 - CRITICAL: NO Statement-type questions.
 - CRITICAL: NO Assertion-Reason questions.
