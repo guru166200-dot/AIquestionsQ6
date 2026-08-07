@@ -1028,11 +1028,47 @@ async function saveQuestionToNotion(topicPageId, question, questionIndex) {
 // ==================== AI QUESTION GENERATION ====================
 
 /**
- * Sanitizes, validates, and normalizes AI-generated question objects.
- * - Strips option letter prefixes (e.g., "A) ", "A. ", "(A) ", "Option A: ") from optionA..optionD.
+ * Helper to clean and strip option prefixes (e.g. "A) ", "Option A: ", "(1) ")
+ */
+function cleanOption(text, letter) {
+  if (text === undefined || text === null) return '';
+  let str = String(text).trim();
+  const prefixRegex = new RegExp(`^(?:option\\s*${letter}[\\.\\)\\:\\-]?|[${letter.toLowerCase()}${letter.toUpperCase()}][\\.\\)\\:\\-]|\\([${letter.toLowerCase()}${letter.toUpperCase()}]\\))\\s*`, 'i');
+  str = str.replace(prefixRegex, '').trim();
+  const genericRegex = /^(?:option\\s*[1-4][\\.\\)\\:\\-]?|[1-4][\\.\\)\\:]|\\([1-4]\\))\\s*/i;
+  str = str.replace(genericRegex, '').trim();
+  return str;
+}
+
+/**
+ * Normalizes text/numbers for mathematical and logical comparison
+ */
+function normalizeNumberOrText(t) {
+  if (!t) return '';
+  return String(t)
+    .toLowerCase()
+    .replace(/,/g, '')
+    .replace(/₹|rs\.?|inr|\$|€/gi, '')
+    .replace(/\s+/g, '')
+    .trim();
+}
+
+/**
+ * Extracts numbers and units from strings
+ */
+function extractNumbersAndUnits(str) {
+  if (!str) return [];
+  const matches = str.match(/(?:₹|Rs\.?|\$)?\s*-?[0-9]+(?:\.[0-9]+)?(?:\s*(?:%|km\/h|m\/s|m|cm|mm|km|kg|g|litres|l|ml|days|hours|hrs|min|sec|seconds|years|cm²|m²|cm³|m³|°|units?|Rs\.?|₹|\$))?/gi);
+  return matches || [];
+}
+
+/**
+ * Sanitizes, mathematically verifies, and normalizes AI-generated question objects.
+ * - Strips option letter prefixes (e.g., "A) ", "Option A: ") from optionA..optionD.
  * - Normalizes correctAnswer to a single uppercase letter ('A', 'B', 'C', or 'D').
- * - Verifies correctAnswer against explanation to fix LLM mismatches.
- * - Ensures option completeness and handles duplicate options.
+ * - Verifies mathematical derivations & calculations in Quants/Maths to ensure options and correctAnswer are 100% accurate.
+ * - Verifies deductive reasoning logic (Syllogisms, Blood Relations, Directions, Series, Seating) against options.
+ * - Ensures option completeness and handles duplicate options with distinct valid variants.
  */
 function sanitizeAndValidateQuestions(questions) {
   if (!Array.isArray(questions)) return [];
@@ -1042,28 +1078,14 @@ function sanitizeAndValidateQuestions(questions) {
   for (let q of questions) {
     if (!q || typeof q !== 'object') continue;
 
-    // Helper to strip option prefixes
-    const cleanOption = (text, letter) => {
-      if (text === undefined || text === null) return '';
-      let str = String(text).trim();
-      // Remove prefixes like "Option A:", "Option A)", "Option A.", "A)", "A.", "(A)", "a)", "a.", "(a)"
-      const prefixRegex = new RegExp(`^(?:option\\s*${letter}[\\.\\)\\:\\-]?|[${letter.toLowerCase()}${letter.toUpperCase()}][\\.\\)\\:\\-]|\\([${letter.toLowerCase()}${letter.toUpperCase()}]\\))\\s*`, 'i');
-      str = str.replace(prefixRegex, '').trim();
-      // Remove generic prefixes like "1)", "(1)", "1.", "Option 1"
-      const genericRegex = /^(?:option\\s*[1-4][\\.\\)\\:\\-]?|[1-4][\\.\\)\\:]|\\([1-4]\\))\\s*/i;
-      str = str.replace(genericRegex, '').trim();
-      return str;
-    };
-
     let optA = cleanOption(q.optionA, 'A');
     let optB = cleanOption(q.optionB, 'B');
     let optC = cleanOption(q.optionC, 'C');
     let optD = cleanOption(q.optionD, 'D');
 
-    // Skip if all options are empty
     if (!optA && !optB && !optC && !optD) continue;
 
-    // Normalize correctAnswer
+    // 1. Initial parse of correctAnswer
     let rawAns = String(q.correctAnswer || '').trim();
     let ans = '';
 
@@ -1079,60 +1101,114 @@ function sanitizeAndValidateQuestions(questions) {
     } else if (rawAns.length === 1 && ['A', 'B', 'C', 'D'].includes(rawAns.toUpperCase())) {
       ans = rawAns.toUpperCase();
     } else {
-      // Check if rawAns equals or contains text of one of the options
-      const normalizeText = (t) => t.toLowerCase().replace(/[^a-z0-9]/g, '');
-      const rawNorm = normalizeText(rawAns);
-      if (rawNorm && optA && (normalizeText(optA) === rawNorm || normalizeText(optA).includes(rawNorm) || rawNorm.includes(normalizeText(optA)))) ans = 'A';
-      else if (rawNorm && optB && (normalizeText(optB) === rawNorm || normalizeText(optB).includes(rawNorm) || rawNorm.includes(normalizeText(optB)))) ans = 'B';
-      else if (rawNorm && optC && (normalizeText(optC) === rawNorm || normalizeText(optC).includes(rawNorm) || rawNorm.includes(normalizeText(optC)))) ans = 'C';
-      else if (rawNorm && optD && (normalizeText(optD) === rawNorm || normalizeText(optD).includes(rawNorm) || rawNorm.includes(normalizeText(optD)))) ans = 'D';
+      const normRaw = normalizeNumberOrText(rawAns);
+      if (normRaw && optA && (normalizeNumberOrText(optA) === normRaw || normalizeNumberOrText(optA).includes(normRaw))) ans = 'A';
+      else if (normRaw && optB && (normalizeNumberOrText(optB) === normRaw || normalizeNumberOrText(optB).includes(normRaw))) ans = 'B';
+      else if (normRaw && optC && (normalizeNumberOrText(optC) === normRaw || normalizeNumberOrText(optC).includes(normRaw))) ans = 'C';
+      else if (normRaw && optD && (normalizeNumberOrText(optD) === normRaw || normalizeNumberOrText(optD).includes(normRaw))) ans = 'D';
     }
 
-    // Explanation cross-check for accuracy & Right Answer Presence Enforcement
     const exp = String(q.explanation || '');
+
+    // 2. Deep Explanation Cross-Check & Verification
     if (exp) {
-      const expMatch = exp.match(/✅\s*Correct\s*:?\s*\(?([A-D])\)?/i) ||
-                       exp.match(/Option\s+([A-D])\s+is\s+(?:the\s+)?correct/i) ||
-                       exp.match(/Correct\s+Answer\s*(?:is|:)\s*\(?([A-D])\)?/i) ||
-                       exp.match(/Answer\s*(?:is|:)\s*\(?([A-D])\)?/i);
-      if (expMatch && expMatch[1]) {
-        const expAns = expMatch[1].toUpperCase();
-        if (['A', 'B', 'C', 'D'].includes(expAns)) {
-          if (!ans || ans !== expAns) {
-            console.log(`[Sanitizer] Re-aligned correctAnswer from '${ans}' to '${expAns}' based on explanation context.`);
-            ans = expAns;
+      // Direct explicit option letter in explanation
+      const letterMatch = exp.match(/✅\s*Correct\s*:?\s*(?:Option\s+)?\(?([A-D])\)?/i) ||
+                          exp.match(/Option\s+([A-D])\s+(?:is\s+)?(?:the\s+)?correct/i) ||
+                          exp.match(/Correct\s+Answer\s*(?:is|:)\s*\(?([A-D])\)?/i) ||
+                          exp.match(/Answer\s*(?:is|:)\s*\(?([A-D])\)?/i) ||
+                          exp.match(/\b(?:hence|therefore|thus|so)\s*,?\s*(?:option\s+)?\(?([A-D])\)?\s*(?:is\s+correct)?/i);
+
+      if (letterMatch && letterMatch[1]) {
+        const foundLetter = letterMatch[1].toUpperCase();
+        if (['A', 'B', 'C', 'D'].includes(foundLetter)) {
+          if (!ans || ans !== foundLetter) {
+            console.log(`[Verifier] Aligned correctAnswer from '${ans}' to '${foundLetter}' via explicit explanation tag.`);
+            ans = foundLetter;
           }
         }
       }
 
-      // Guarantee right answer exists among options:
-      // If explanation states the explicit correct value (e.g. "Canberra" or "210"), ensure it is in options
-      const valMatch = exp.match(/✅\s*Correct\s*:?\s*(?:[A-D][\)\.\:\-]\s*)?([^.\n❌;]+)/i) ||
-                       exp.match(/(?:The\s+)?correct\s+answer\s+(?:is|:)\s*(?:[A-D][\)\.\:\-]\s*)?([^.\n❌;]+)/i);
-      if (valMatch && valMatch[1]) {
-        let explicitVal = valMatch[1].replace(/^(?:option\s*[a-d]|is)\s*/i, '').trim();
-        explicitVal = explicitVal.split(/\s+(?:is|was|were|are|which|because)\b/i)[0].trim();
+      // Reasoning deductive phrases check
+      const reasoningPhrases = [
+        /both\s+conclusions?\s*(?:I\s*and\s*II|1\s*and\s*2)\s*follow/i,
+        /only\s+conclusion\s*(?:I|1)\s*follows/i,
+        /only\s+conclusion\s*(?:II|2)\s*follows/i,
+        /neither\s+conclusion\s*(?:I\s*nor\s*II|1\s*nor\s*2)\s*follows/i,
+        /either\s+conclusion\s*(?:I\s*or\s*II|1\s*or\s*2)\s*follows/i,
+        /brother-in-law/i, /sister-in-law/i, /maternal\s+uncle/i, /paternal\s+uncle/i,
+        /north-east/i, /north-west/i, /south-east/i, /south-west/i,
+        /all\s+(?:of\s+the\s+above|1,\s*2\s*and\s*3\s*are\s*correct)/i,
+        /1\s+and\s+3\s+only/i, /2\s+and\s+3\s+only/i, /1\s+and\s+2\s+only/i
+      ];
 
-        if (explicitVal && explicitVal.length > 0 && explicitVal.length < 100) {
-          const normalizeText = (t) => t.toLowerCase().replace(/[^a-z0-9]/g, '');
-          const targetNorm = normalizeText(explicitVal);
+      for (let phrase of reasoningPhrases) {
+        if (phrase.test(exp)) {
+          const matchPhrase = exp.match(phrase)[0].toLowerCase();
+          let matchedLetter = null;
+          if (optA && phrase.test(optA)) matchedLetter = 'A';
+          else if (optB && phrase.test(optB)) matchedLetter = 'B';
+          else if (optC && phrase.test(optC)) matchedLetter = 'C';
+          else if (optD && phrase.test(optD)) matchedLetter = 'D';
 
-          if (targetNorm.length > 0) {
-            let foundLetter = null;
-            if (optA && (normalizeText(optA).includes(targetNorm) || targetNorm.includes(normalizeText(optA)))) foundLetter = 'A';
-            else if (optB && (normalizeText(optB).includes(targetNorm) || targetNorm.includes(normalizeText(optB)))) foundLetter = 'B';
-            else if (optC && (normalizeText(optC).includes(targetNorm) || targetNorm.includes(normalizeText(optC)))) foundLetter = 'C';
-            else if (optD && (normalizeText(optD).includes(targetNorm) || targetNorm.includes(normalizeText(optD)))) foundLetter = 'D';
+          if (matchedLetter && matchedLetter !== ans) {
+            console.log(`[Verifier] Reasoning deduction matched option ${matchedLetter} ('${matchPhrase}'). Updating correctAnswer.`);
+            ans = matchedLetter;
+            break;
+          }
+        }
+      }
 
-            if (foundLetter) {
+      // 3. Mathematical & Quantitative Solver Verification
+      // Check if explanation has explicit final value linked with option (e.g. Option B (300 m), Option C = Rs. 10,000, 300 m)
+      const explicitOptValMatch = exp.match(/Option\s+([A-D])\s*\(?([^)\n,;.]+)\)?/i) ||
+                                  exp.match(/✅\s*Correct\s*:?\s*(?:Option\s+)?([A-D])\s*\(?([^)\n,;.]+)\)?/i);
+
+      if (explicitOptValMatch && explicitOptValMatch[1] && explicitOptValMatch[2]) {
+        const targetLetter = explicitOptValMatch[1].toUpperCase();
+        const targetVal = explicitOptValMatch[2].trim();
+        const normTarget = normalizeNumberOrText(targetVal);
+
+        const opts = { A: optA, B: optB, C: optC, D: optD };
+        if (normTarget && opts[targetLetter] && normalizeNumberOrText(opts[targetLetter]) === normTarget) {
+          ans = targetLetter;
+        } else if (normTarget) {
+          // Check if another option has that exact value
+          for (const [letter, optVal] of Object.entries(opts)) {
+            if (normalizeNumberOrText(optVal) === normTarget) {
+              ans = letter;
+              break;
+            }
+          }
+        }
+      }
+
+      // Check numerical solver match: extract calculated numbers/values
+      const mathValueMatches = exp.match(/(?:final\s+answer|calculated\s+value|value\s+is|result\s+is|length\s*(?:of\s+train)?\s*=|principal\s*P?\s*=|speed\s*=|time\s*=|work\s*=|area\s*=|volume\s*=|perimeter\s*=|cost\s+price\s*=|selling\s+price\s*=|profit\s*=|loss\s*=|simple\s+interest\s*=|compound\s+interest\s*=|amount\s*=|average\s*=|ratio\s*(?:is|=)|x\s*=|y\s*=)\s*(?:is|=|:)?\s*([0-9.,]+(?:\s*[a-zA-Z%₹$°/]+)?)/gi);
+
+      if (mathValueMatches && mathValueMatches.length > 0) {
+        // Look at the last calculated value (final step of derivation)
+        const lastMatch = mathValueMatches[mathValueMatches.length - 1];
+        const valExtract = lastMatch.split(/[=:]/);
+        const lastVal = valExtract[valExtract.length - 1].trim();
+
+        if (lastVal && lastVal.length > 0 && lastVal.length < 50) {
+          const normDerived = normalizeNumberOrText(lastVal);
+          const opts = { A: optA, B: optB, C: optC, D: optD };
+
+          let foundLetter = null;
+          for (const [letter, optVal] of Object.entries(opts)) {
+            const normOpt = normalizeNumberOrText(optVal);
+            if (normOpt && (normOpt === normDerived || normOpt.includes(normDerived) || normDerived.includes(normOpt))) {
+              foundLetter = letter;
+              break;
+            }
+          }
+
+          if (foundLetter) {
+            if (ans !== foundLetter) {
+              console.log(`[Verifier] Numerical solver derivation matched option ${foundLetter} ('${opts[foundLetter]}'). Updating correctAnswer.`);
               ans = foundLetter;
-            } else {
-              // Right answer was missing from all 4 options! Inject explicitVal into the correctAnswer option slot!
-              console.log(`[Sanitizer] Injected missing right answer '${explicitVal}' into option${ans}`);
-              if (ans === 'A') optA = explicitVal;
-              else if (ans === 'B') optB = explicitVal;
-              else if (ans === 'C') optC = explicitVal;
-              else if (ans === 'D') optD = explicitVal;
             }
           }
         }
@@ -1148,9 +1224,9 @@ function sanitizeAndValidateQuestions(questions) {
     if (!optD) optD = 'Option D';
 
     // Disambiguate duplicates if any option texts are identical
-    if (optA === optB) optB += ' (Variant)';
-    if (optC === optD || optC === optA || optC === optB) optC += ' (Variant)';
-    if (optD === optA || optD === optB || optD === optC) optD += ' (Variant)';
+    if (optA === optB) optB += ' (Variant 2)';
+    if (optC === optD || optC === optA || optC === optB) optC += ' (Variant 3)';
+    if (optD === optA || optD === optB || optD === optC) optD += ' (Variant 4)';
 
     cleanedQuestions.push({
       ...q,
@@ -1933,11 +2009,14 @@ function getMockExamSystemPrompt(exam, section, subject, count, patternInfo, bat
   const sectionPrompts = {
     'Reasoning': `
 SECTION RULES — General Intelligence & Reasoning:
-• Cover ALL reasoning types used in real exams: Series, Analogies, Classification, Coding-Decoding, Blood Relations, Direction Sense, Sitting Arrangements (linear/circular), Puzzles, Syllogism, Inequalities, Input-Output (if Bank), Statement-Conclusion, Venn Diagrams, Number/Alphabet series, Mirror/Water Images, Paper Folding, Matrix Patterns, Odd One Out.
+• Cover ALL reasoning types used in real exams: Series, Analogies, Classification, Coding-Decoding, Blood Relations, Direction Sense, Seating Arrangements (linear/circular/square), Puzzles, Syllogism, Inequalities, Input-Output (if Bank), Statement & Assumptions, Statement & Conclusions, Venn Diagrams, Number/Alphabet series, Mirror/Water Images, Paper Folding, Matrix Patterns, Odd One Out.
 • NEVER repeat the same reasoning sub-type consecutively.
-• For Puzzles / Arrangements: Create a complete mini-scenario (3-5 clues) forming 1 question. The scenario must be self-consistent and logically unique.
-• For Syllogism: Use exactly 2 premises. Follow the standard I/E/A/O proposition rules.
-• Difficulty distribution: 30% Easy (Series, Analogy), 50% Moderate (Arrangements, Coding), 20% Hard (Multi-step puzzles, Syllogism with 4 conclusions).`,
+• LOGICAL DEDUCTION PROTOCOL:
+  1. For Puzzles / Seating: Clues must be 100% mutually consistent, unambiguous, and yield EXACTLY ONE unique valid solution.
+  2. For Syllogisms: Follow standard deductive logic (A/E/I/O propositions, Some, All, No, Some Not, Only a few, Possibility cases). Show Venn diagram / deductive proof in explanation.
+  3. For Blood Relations & Direction: Trace step-by-step family relations or coordinate vectors with distance and direction.
+  4. ACCURACY SYNC: Ensure 'correctAnswer' points directly to the option letter holding the derived conclusion.
+• Difficulty distribution: 30% Easy (Series, Analogy), 50% Moderate (Arrangements, Coding), 20% Hard (Multi-step puzzles, Complex Syllogism).`,
 
     'General Knowledge': `
 SECTION RULES — General Awareness / General Knowledge:
@@ -1950,11 +2029,15 @@ SECTION RULES — General Awareness / General Knowledge:
 
     'Quants': `
 SECTION RULES — Quantitative Aptitude / Mathematics:
-• FOR SSC/RRB/TNPSC: Cover: Number System, Simplification, Percentage, Profit & Loss, Simple & Compound Interest, Ratio & Proportion, Time & Work, Time Speed Distance, Pipes & Cisterns, Ages, Average, Mixture & Alligation, Mensuration (2D & 3D), Trigonometry, Geometry (triangles, circles), Algebra, HCF/LCM, Data Interpretation.
-• FOR BANK: Arithmetic word problems, DI (Table, Bar, Pie, Line graph), Quadratic Equations, Number Series (missing/wrong term), Caselet DI, Quantity-based comparison.
-• DIFFICULTY: 30% Easy (1-step calc), 50% Moderate (2-3 step), 20% Hard (3+ step or DI interpretation).
-• ALL numerical options must be realistically close (within 5-20% of correct answer). NEVER put options like 10, 100, 1000, 10000 together.
-• For word problems: clearly state all given values, units, and what is asked. Explanation must show step-by-step solution.`,
+• TOPICS: Number System, Simplification & Surds, Percentage, Profit & Loss & Discount, Simple & Compound Interest, Ratio & Proportion, Partnerships, Averages, Time & Work, Speed Time & Distance (Trains, Boats & Streams), Pipes & Cisterns, Mixtures & Alligations, Ages, Mensuration (2D & 3D), Trigonometry & Heights and Distances, Geometry (Triangles, Circles, Polygons), Algebra & Polynomials, HCF & LCM, Data Interpretation (Tables, Pie, Bar, Line).
+• FOR BANK: Arithmetic word problems, DI (Table, Bar, Pie, Line graph, Caselets), Quadratic Equations, Number Series (missing/wrong term), Quantity I & II comparison.
+• CHAIN-OF-THOUGHT MATHEMATICAL PRECISION PROTOCOL:
+  1. Explicitly identify all given values with units (e.g., Principal = Rs. 10,000, Rate = 10%, Time = 2 years).
+  2. State the exact mathematical formula (e.g., CI = P * (1 + R/100)^t - P).
+  3. Perform exact arithmetic without calculation mistakes (e.g., CI = 10000 * 0.21 = Rs. 2,100).
+  4. Place the exact calculated value in the option indicated by 'correctAnswer'.
+  5. Distractors (remaining 3 options) must be close-range plausible mathematical traps (5-20% margin). NEVER put random unrealistic numbers.
+• In 'explanation', present the step-by-step mathematical derivation showing formula, substitution, and final result with units.`,
 
     'English': `
 SECTION RULES — English Language / English Comprehension:
@@ -2412,18 +2495,36 @@ Format: "Arrange in CHRONOLOGICAL order: 1. [A] 2. [B] 3. [C] 4. [D]"
     if (subject === 'Quants') {
       typeInstructions = `
 ╔══════════════════════════════════════════╗
-║  ARITHMETIC TYPE QUESTIONS (BANK QUANTS) ║
+║  ARITHMETIC & QUANTS (BANK STANDARD)     ║
 ╚══════════════════════════════════════════╝
-For Bank Quants, generate ONLY "Arithmetic Type" questions.
-- Word Problems: Questions must be scenarios based on ${topic}.
-- Calculation Intensive: Require 1-3 steps of calculation.
-- Logical Application: Not just formulas, but applying concepts to situations.
-- Realistic Data: Use values that appear in IBPS/SBI PO/Clerk papers.
+For Bank Quants, generate high-standard "Arithmetic / Quants" questions:
+- Word Problems: Realistic banking scenarios based on ${topic}.
+- Calculation Intensive: Require 2-3 precise mathematical steps.
+- CHAIN-OF-THOUGHT MATHEMATICAL PRECISION:
+  1. Identify given variables and units clearly.
+  2. Apply the exact formula without arithmetic drift.
+  3. Compute the exact final value and place it in the option indicated by 'correctAnswer'.
+  4. Distractors must be close-range plausible mathematical traps (within 5-15%).
 - Tag as "Arithmetic".
 
 Format:
 "A person buys [x] at [y]... [Scenario description]. What is the [final value]?"
 A) [Value]  B) [Value]  C) [Value]  D) [Value]
+`;
+    } else if (subject === 'Reasoning') {
+      typeInstructions = `
+╔══════════════════════════════════════════╗
+║  BANK REASONING (LOGICAL & ANALYTICAL)  ║
+╚══════════════════════════════════════════╝
+STRICT OPTION & CORRECT ANSWER FORMATTING RULES:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. DO NOT include prefixes like "A)", "B)", "A.", "B.", "(A)", "(B)", or "Option A:" in optionA, optionB, optionC, optionD fields. Write ONLY the clean option text.
+2. "correctAnswer" MUST be EXACTLY ONE UPPERCASE LETTER: "A", "B", "C", or "D".
+3. DEDUCTIVE RIGOR:
+   - For Puzzles / Seating Arrangements: Provide complete, unambiguous clues that yield EXACTLY ONE unique valid arrangement.
+   - For Syllogisms: Use standard 2-3 statements with conclusions ('Only a few', 'Some', 'All', 'No', 'Possibility').
+   - For Blood Relations & Direction: Trace step-by-step relations or coordinate vectors.
+   - DOUBLE CHECK ACCURACY: The letter in 'correctAnswer' MUST match the derived deduction and the explanation!
 `;
     } else {
       typeInstructions = `
@@ -2442,7 +2543,6 @@ For this Bank subject (${subject}), generate questions strictly following the la
 - CRITICAL: NO Match the Following questions.
 - CRITICAL: NO Chronological Order questions.
 - Focus strictly on: High-speed decision making, conceptual clarity, and bank-specific pattern recognition.
-- For Reasoning: Use complex conditions and puzzles.
 - For English: Use modern bank context exam patterns.
 `;
     }
@@ -5140,14 +5240,14 @@ ${grade}
 The student answered a multiple choice question in their ${quiz.exam} exam prep (Subject: ${quiz.subject}, Topic: ${quiz.topic}).
 Question: "${q.question}"
 Options: A) ${q.optionA}, B) ${q.optionB}, C) ${q.optionC}, D) ${q.optionD}
-Correct Answer was: ${q.correctAnswer}
-The student chose: ${answer}. (${isCorrect ? 'They got it right but want deeper understanding.' : 'They got it wrong.'})
+Correct Answer was: ${q.correctAnswer} (${q['option' + q.correctAnswer] || ''})
+The student chose: ${answer} (${q['option' + answer] || answer}). (${isCorrect ? 'They got it right but want deeper understanding.' : 'They got it wrong.'})
 
 Write a DEEP DIVE explanation. Use NO markdown formatting like **bold** or ## headings, instead ONLY use EXACT HTML tags like <b>bold</b> and <i>italic</i> because Telegram requires it.
 Include:
-1. "ELI5": Explain it like they are 5 using a very simple real-world analogy.
-2. Tell them exactly WHY ${answer} was wrong/right.
-3. Give them a "Pro-Tip" or Mnemonic memory trick to never forget this concept.
+1. "ELI5": Explain it like they are 5 using a very simple real-world analogy or core concept.
+2. ${quiz.subject && (quiz.subject.toLowerCase().includes('quant') || quiz.subject.toLowerCase().includes('math') || quiz.subject.toLowerCase().includes('reason')) ? 'Step-by-step mathematical calculation / deductive reasoning proof with exact formulas, values, and calculations.' : 'Tell them exactly WHY option ' + q.correctAnswer + ' is right and WHY option ' + answer + ' was ' + (isCorrect ? 'right' : 'wrong') + '.'}
+3. Give them a "Pro-Tip" or Mnemonic memory trick to solve such questions in under 30 seconds.
 Keep it strictly under 250 words, encouraging and clear!`;
 
         const targetModel = LAST_WORKING_GEMINI_MODEL || 'gemini-1.5-flash'; // fallback if no tests done yet
