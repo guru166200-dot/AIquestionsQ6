@@ -1075,15 +1075,16 @@ function normalizeNumberOrText(val) {
 }
 
 /**
- * Comprehensive 8-Layer Verification Engine for AI Question & Answer Accuracy:
+ * Comprehensive 9-Layer Verification Engine for AI Question & Answer Accuracy:
  * - Layer 1: Option Sanitization & Prefix Cleaning (Strips "A) ", "Option A: ", "(1) ")
  * - Layer 2: CorrectAnswer Normalization (Maps to clean uppercase 'A', 'B', 'C', or 'D')
- * - Layer 3: Explicit Explanation Option Letter Reconciliation
- * - Layer 4: Deductive Reasoning Multi-Pattern Verification (Syllogisms, Blood Relations, Directions, Seating)
- * - Layer 5: Quantitative & Mathematical Chain-of-Thought Solver Verification
- * - Layer 6: Missing Answer Rescue & Value Injection (Prevents questions with 0 correct options)
- * - Layer 7: Negation & "NOT/INCORRECT" Question-Stem Alignment
- * - Layer 8: Duplicate Disambiguation & Complete Fallback Guard
+ * - Layer 3: Statement Type Semantic Reconciliation ("1, 2 and 3" vs "1 and 2 only", "2 and 3 only", "1 and 3 only")
+ * - Layer 4: Explicit Explanation Option Letter Reconciliation ("✅ Correct: Option B")
+ * - Layer 5: Exact Phrase Match of Correct Statement from Explanation to Options
+ * - Layer 6: Deductive Reasoning & Analytical Alignment (Syllogisms, Blood Relations, Directions, Puzzles)
+ * - Layer 7: Quantitative & Mathematical Chain-of-Thought Solver Verification
+ * - Layer 8: Assertion & Reason Standard Option Matrix Reconciliation
+ * - Layer 9: Negation & "NOT / INCORRECT / FALSE" Stem Alignment
  */
 function sanitizeAndValidateQuestions(questions) {
   if (!Array.isArray(questions)) return [];
@@ -1100,51 +1101,112 @@ function sanitizeAndValidateQuestions(questions) {
 
     if (!optA && !optB && !optC && !optD) continue;
 
-    // Layer 1 & 2: CorrectAnswer Normalization
-    let rawAns = String(q.correctAnswer || '').trim();
-    let ans = '';
+    const opts = { A: optA, B: optB, C: optC, D: optD };
 
-    const ansLower = rawAns.toLowerCase();
-    if (ansLower === 'a' || ansLower === 'optiona' || ansLower === 'option a' || ansLower === 'a)' || ansLower === 'a.' || ansLower === '(a)' || ansLower === '1' || ansLower === 'option 1') {
-      ans = 'A';
-    } else if (ansLower === 'b' || ansLower === 'optionb' || ansLower === 'option b' || ansLower === 'b)' || ansLower === 'b.' || ansLower === '(b)' || ansLower === '2' || ansLower === 'option 2') {
-      ans = 'B';
-    } else if (ansLower === 'c' || ansLower === 'optionc' || ansLower === 'option c' || ansLower === 'c)' || ansLower === 'c.' || ansLower === '(c)' || ansLower === '3' || ansLower === 'option 3') {
-      ans = 'C';
-    } else if (ansLower === 'd' || ansLower === 'optiond' || ansLower === 'option d' || ansLower === 'd)' || ansLower === 'd.' || ansLower === '(d)' || ansLower === '4' || ansLower === 'option 4') {
-      ans = 'D';
-    } else if (rawAns.length === 1 && ['A', 'B', 'C', 'D'].includes(rawAns.toUpperCase())) {
-      ans = rawAns.toUpperCase();
+    // Layer 1 & 2: CorrectAnswer Normalization
+    let rawAns = String(q.correctAnswer || '').trim().toUpperCase();
+    let ans = '';
+    if (['A', 'B', 'C', 'D'].includes(rawAns)) {
+      ans = rawAns;
     } else {
-      const normRaw = normalizeNumberOrText(rawAns);
-      if (normRaw && optA && (normalizeNumberOrText(optA) === normRaw || normalizeNumberOrText(optA).includes(normRaw))) ans = 'A';
-      else if (normRaw && optB && (normalizeNumberOrText(optB) === normRaw || normalizeNumberOrText(optB).includes(normRaw))) ans = 'B';
-      else if (normRaw && optC && (normalizeNumberOrText(optC) === normRaw || normalizeNumberOrText(optC).includes(normRaw))) ans = 'C';
-      else if (normRaw && optD && (normalizeNumberOrText(optD) === normRaw || normalizeNumberOrText(optD).includes(normRaw))) ans = 'D';
+      const m = rawAns.match(/\b([A-D])\b/i) || rawAns.match(/^(?:Option\s*)?([1-4])/i);
+      if (m) {
+        if (['1', '2', '3', '4'].includes(m[1])) {
+          ans = ['A', 'B', 'C', 'D'][parseInt(m[1]) - 1];
+        } else {
+          ans = m[1].toUpperCase();
+        }
+      }
     }
 
-    const exp = String(q.explanation || '');
-    const qStem = String(q.question || '');
+    const exp = String(q.explanation || '').trim();
+    const qStem = String(q.question || '').trim();
 
     if (exp) {
-      // Layer 3: Explicit Option Letter in Explanation
-      const letterMatch = exp.match(/✅\s*Correct\s*:?\s*(?:Option\s+)?\(?([A-D])\)?/i) ||
-                          exp.match(/Option\s+([A-D])\s+(?:is\s+)?(?:the\s+)?correct/i) ||
-                          exp.match(/Correct\s+Answer\s*(?:is|:)\s*\(?([A-D])\)?/i) ||
-                          exp.match(/Answer\s*(?:is|:)\s*\(?([A-D])\)?/i) ||
-                          exp.match(/\b(?:hence|therefore|thus|so)\s*,?\s*(?:option\s+)?\(?([A-D])\)?\s*(?:is\s+correct)?/i);
+      // Layer 3: Statement Type Semantic Reconciliation ("1, 2 and 3" vs "1 and 2 only", etc.)
+      const isAllCorrect = /all\s+(?:three|3|four|4)?\s*(?:statements?|of\s+the\s+above|are\s+correct|are\s+true|are\s+accurate)/i.test(exp) ||
+                           /(?:statements?\s*)?(?:1,\s*2\s*(?:and|&)\s*3|1,\s*2,\s*3)\s*(?:are\s+correct|are\s+true|are\s+accurate|all\s+follow)/i.test(exp) ||
+                           /every\s+statement\s+is\s+(?:correct|true|accurate)/i.test(exp);
 
-      if (letterMatch && letterMatch[1]) {
-        const foundLetter = letterMatch[1].toUpperCase();
-        if (['A', 'B', 'C', 'D'].includes(foundLetter)) {
-          if (!ans || ans !== foundLetter) {
-            console.log(`[Verifier Layer 3] Aligned correctAnswer from '${ans}' to '${foundLetter}' via explicit explanation tag.`);
-            ans = foundLetter;
+      const is1and2Only = /(?:only\s+statements?\s*1\s*(?:and|&)\s*2|1\s*(?:and|&)\s*2\s*only|statements?\s*1\s*(?:and|&)\s*2\s*are\s*correct|statement\s*3\s*is\s*(?:in)?correct)/i.test(exp) && !isAllCorrect;
+      const is2and3Only = /(?:only\s+statements?\s*2\s*(?:and|&)\s*3|2\s*(?:and|&)\s*3\s*only|statements?\s*2\s*(?:and|&)\s*3\s*are\s*correct|statement\s*1\s*is\s*(?:in)?correct)/i.test(exp) && !isAllCorrect;
+      const is1and3Only = /(?:only\s+statements?\s*1\s*(?:and|&)\s*3|1\s*(?:and|&)\s*3\s*only|statements?\s*1\s*(?:and|&)\s*3\s*are\s*correct|statement\s*2\s*is\s*(?:in)?correct)/i.test(exp) && !isAllCorrect;
+
+      if (isAllCorrect) {
+        for (const [letter, optText] of Object.entries(opts)) {
+          if (/(?:all\s+of\s+the\s+above|1,\s*2\s*(?:and|&)\s*3|1,\s*2,\s*3|all\s+are\s+correct)/i.test(optText)) {
+            if (ans !== letter) {
+              console.log(`[Statement Verifier] Corrected answer from '${ans}' to '${letter}' ('${optText}') because explanation confirms all statements are correct.`);
+              ans = letter;
+            }
+            break;
+          }
+        }
+      } else if (is1and2Only) {
+        for (const [letter, optText] of Object.entries(opts)) {
+          if (/1\s*(?:and|&)\s*2\s*only/i.test(optText) || /1\s*and\s*2\b/i.test(optText)) {
+            if (ans !== letter) {
+              console.log(`[Statement Verifier] Corrected answer from '${ans}' to '${letter}' ('${optText}') for 1 and 2 only.`);
+              ans = letter;
+            }
+            break;
+          }
+        }
+      } else if (is2and3Only) {
+        for (const [letter, optText] of Object.entries(opts)) {
+          if (/2\s*(?:and|&)\s*3\s*only/i.test(optText) || /2\s*and\s*3\b/i.test(optText)) {
+            if (ans !== letter) {
+              console.log(`[Statement Verifier] Corrected answer from '${ans}' to '${letter}' ('${optText}') for 2 and 3 only.`);
+              ans = letter;
+            }
+            break;
+          }
+        }
+      } else if (is1and3Only) {
+        for (const [letter, optText] of Object.entries(opts)) {
+          if (/1\s*(?:and|&)\s*3\s*only/i.test(optText) || /1\s*and\s*3\b/i.test(optText)) {
+            if (ans !== letter) {
+              console.log(`[Statement Verifier] Corrected answer from '${ans}' to '${letter}' ('${optText}') for 1 and 3 only.`);
+              ans = letter;
+            }
+            break;
           }
         }
       }
 
-      // Layer 4: Deductive Reasoning Multi-Pattern Verification
+      // Layer 4: Explicit Option Letter in Explanation
+      const explicitLetterMatch = exp.match(/✅\s*Correct\s*:?\s*(?:Option\s+)?\(?([A-D])\)?(?:\s*[:.\-)]|$)/i) ||
+                                  exp.match(/Correct\s+Option\s*(?:is|:)?\s*\(?([A-D])\)?/i) ||
+                                  exp.match(/Correct\s+Answer\s*(?:is|:)?\s*\(?([A-D])\)?/i) ||
+                                  exp.match(/\b(?:Hence|Therefore|Thus|So)\s*,?\s*(?:Option\s+)?\(?([A-D])\)?\s*is\s+correct/i);
+
+      if (explicitLetterMatch && explicitLetterMatch[1]) {
+        const found = explicitLetterMatch[1].toUpperCase();
+        if (['A', 'B', 'C', 'D'].includes(found)) {
+          ans = found;
+        }
+      }
+
+      // Layer 5: Exact Phrase Match of Correct Statement from Explanation to Options
+      const correctExtract = exp.match(/✅\s*Correct\s*:?\s*([^.\n]+)/i);
+      if (correctExtract && correctExtract[1] && !isAllCorrect) {
+        const snippet = correctExtract[1].trim();
+        const normSnippet = normalizeNumberOrText(snippet);
+        if (normSnippet.length > 3) {
+          for (const [letter, optText] of Object.entries(opts)) {
+            const normOpt = normalizeNumberOrText(optText);
+            if (normOpt && (normSnippet.includes(normOpt) || normOpt.includes(normSnippet))) {
+              if (ans !== letter) {
+                console.log(`[Option Verifier] Aligned answer to '${letter}' ('${optText}') matching explanation snippet.`);
+                ans = letter;
+                break;
+              }
+            }
+          }
+        }
+      }
+
+      // Layer 6: Deductive Reasoning Multi-Pattern Verification
       const reasoningPhrases = [
         /both\s+conclusions?\s*(?:I\s*and\s*II|1\s*and\s*2)\s*follow/i,
         /only\s+conclusion\s*(?:I|1)\s*follows/i,
@@ -1154,8 +1216,6 @@ function sanitizeAndValidateQuestions(questions) {
         /brother-in-law/i, /sister-in-law/i, /maternal\s+uncle/i, /paternal\s+uncle/i,
         /father-in-law/i, /mother-in-law/i, /daughter-in-law/i, /son-in-law/i,
         /north-east/i, /north-west/i, /south-east/i, /south-west/i,
-        /all\s+(?:of\s+the\s+above|1,\s*2\s*and\s*3\s*are\s*correct)/i,
-        /1\s+and\s+3\s+only/i, /2\s+and\s+3\s+only/i, /1\s+and\s+2\s+only/i,
         /none\s+of\s+the\s+above/i
       ];
 
@@ -1169,14 +1229,14 @@ function sanitizeAndValidateQuestions(questions) {
           else if (optD && phrase.test(optD)) matchedLetter = 'D';
 
           if (matchedLetter && matchedLetter !== ans) {
-            console.log(`[Verifier Layer 4] Reasoning deduction matched option ${matchedLetter} ('${matchPhrase}'). Updating correctAnswer.`);
+            console.log(`[Verifier Layer 6] Reasoning deduction matched option ${matchedLetter} ('${matchPhrase}'). Updating correctAnswer.`);
             ans = matchedLetter;
             break;
           }
         }
       }
 
-      // Layer 5: Quantitative & Mathematical Chain-of-Thought Solver Verification
+      // Layer 7: Quantitative & Mathematical Chain-of-Thought Solver Verification
       const explicitOptValMatch = exp.match(/Option\s+([A-D])\s*\(?([^)\n,;.]+)\)?/i) ||
                                   exp.match(/✅\s*Correct\s*:?\s*(?:Option\s+)?([A-D])\s*\(?([^)\n,;.]+)\)?/i);
 
@@ -1185,7 +1245,6 @@ function sanitizeAndValidateQuestions(questions) {
         const targetVal = explicitOptValMatch[2].trim();
         const normTarget = normalizeNumberOrText(targetVal);
 
-        const opts = { A: optA, B: optB, C: optC, D: optD };
         if (normTarget && opts[targetLetter] && normalizeNumberOrText(opts[targetLetter]) === normTarget) {
           ans = targetLetter;
         } else if (normTarget) {
@@ -1198,19 +1257,15 @@ function sanitizeAndValidateQuestions(questions) {
         }
       }
 
-      // Check numerical solver match: extract calculated numbers/values
       const mathValueMatches = exp.match(/(?:final\s+answer|calculated\s+value|value\s+is|result\s+is|length\s*(?:of\s+train)?\s*=|principal\s*P?\s*=|speed\s*=|time\s*=|work\s*=|area\s*=|volume\s*=|perimeter\s*=|cost\s+price\s*=|selling\s+price\s*=|profit\s*=|loss\s*=|simple\s+interest\s*=|compound\s+interest\s*=|amount\s*=|average\s*=|ratio\s*(?:is|=)|x\s*=|y\s*=)\s*(?:is|=|:)?\s*([0-9.,]+(?:\s*[a-zA-Z%₹$°/]+)?)/gi);
 
-      let derivedValue = null;
       if (mathValueMatches && mathValueMatches.length > 0) {
         const lastMatch = mathValueMatches[mathValueMatches.length - 1];
         const valExtract = lastMatch.split(/[=:]/);
-        derivedValue = valExtract[valExtract.length - 1].trim();
+        const derivedValue = valExtract[valExtract.length - 1].trim();
 
         if (derivedValue && derivedValue.length > 0 && derivedValue.length < 50) {
           const normDerived = normalizeNumberOrText(derivedValue);
-          const opts = { A: optA, B: optB, C: optC, D: optD };
-
           let foundLetter = null;
           for (const [letter, optVal] of Object.entries(opts)) {
             const normOpt = normalizeNumberOrText(optVal);
@@ -1222,13 +1277,12 @@ function sanitizeAndValidateQuestions(questions) {
 
           if (foundLetter) {
             if (ans !== foundLetter) {
-              console.log(`[Verifier Layer 5] Numerical solver derivation matched option ${foundLetter} ('${opts[foundLetter]}'). Updating correctAnswer.`);
+              console.log(`[Verifier Layer 7] Numerical solver derivation matched option ${foundLetter} ('${opts[foundLetter]}'). Updating correctAnswer.`);
               ans = foundLetter;
             }
           } else {
-            // Layer 6: Missing Answer Rescue & Value Injection
-            // If derived value is valid and missing from all options, inject it directly into the correctAnswer slot
-            console.log(`[Verifier Layer 6] Injected calculated answer '${derivedValue}' into option${ans || 'A'}`);
+            // Missing Answer Rescue & Value Injection
+            console.log(`[Verifier Layer 7] Injected calculated answer '${derivedValue}' into option${ans || 'A'}`);
             if (!ans) ans = 'A';
             if (ans === 'A') optA = derivedValue;
             else if (ans === 'B') optB = derivedValue;
@@ -1238,7 +1292,28 @@ function sanitizeAndValidateQuestions(questions) {
         }
       }
 
-      // Layer 7: Negation & "NOT / INCORRECT / FALSE" Stem Alignment
+      // Layer 8: Assertion & Reason Alignment
+      if (/Assertion\s*\(?A\)?/i.test(qStem) || /Reason\s*\(?R\)?/i.test(qStem) || (/Assertion\b/i.test(exp) && /Reason\b/i.test(exp))) {
+        if (/Both\s+(?:A|Assertion)\s+and\s+(?:R|Reason)\s+are\s+true\s+and\s+(?:R|Reason)\s+(?:is\s+(?:the\s+)?correct\s+explanation|correctly\s+explains)/i.test(exp)) {
+          for (const [letter, optText] of Object.entries(opts)) {
+            if (/correct\s+explanation/i.test(optText) && !/not\s+(?:the\s+)?correct/i.test(optText)) ans = letter;
+          }
+        } else if (/Both\s+(?:A|Assertion)\s+and\s+(?:R|Reason)\s+are\s+true\s+but\s+(?:R|Reason)\s+(?:is\s+not\s+(?:the\s+)?correct\s+explanation|does\s+not\s+explain)/i.test(exp)) {
+          for (const [letter, optText] of Object.entries(opts)) {
+            if (/not\s+(?:the\s+)?correct\s+explanation/i.test(optText)) ans = letter;
+          }
+        } else if (/(?:A|Assertion)\s+is\s+true\s+but\s+(?:R|Reason)\s+is\s+false/i.test(exp)) {
+          for (const [letter, optText] of Object.entries(opts)) {
+            if (/(?:A|Assertion)\s+is\s+true/i.test(optText) && /(?:R|Reason)\s+is\s+false/i.test(optText)) ans = letter;
+          }
+        } else if (/(?:A|Assertion)\s+is\s+false\s+but\s+(?:R|Reason)\s+is\s+true/i.test(exp)) {
+          for (const [letter, optText] of Object.entries(opts)) {
+            if (/(?:A|Assertion)\s+is\s+false/i.test(optText) && /(?:R|Reason)\s+is\s+true/i.test(optText)) ans = letter;
+          }
+        }
+      }
+
+      // Layer 9: Negation & "NOT / INCORRECT / FALSE" Stem Alignment
       const isNegationQuestion = /\b(?:NOT|INCORRECT|FALSE|EXCEPT|NEVER|CANNOT)\b/i.test(qStem);
       if (isNegationQuestion) {
         const incorrectMatch = exp.match(/(?:Option\s+)?([A-D])\s+(?:is\s+)?(?:incorrect|false|not\s+correct|not\s+true)/i) ||
@@ -1251,7 +1326,7 @@ function sanitizeAndValidateQuestions(questions) {
           else if (falseOption === '4') falseOption = 'D';
 
           if (['A', 'B', 'C', 'D'].includes(falseOption) && ans !== falseOption) {
-            console.log(`[Verifier Layer 7] Negation question reconciled correctAnswer to '${falseOption}'.`);
+            console.log(`[Verifier Layer 9] Negation question reconciled correctAnswer to '${falseOption}'.`);
             ans = falseOption;
           }
         }
@@ -1260,7 +1335,7 @@ function sanitizeAndValidateQuestions(questions) {
 
     if (!ans) ans = 'A'; // Final safe fallback
 
-    // Layer 8: Duplicate Disambiguation & Completeness Guard
+    // Duplicate Disambiguation & Completeness Guard
     if (!optA) optA = 'Option A';
     if (!optB) optB = 'Option B';
     if (!optC) optC = 'Option C';
@@ -1615,7 +1690,15 @@ STRICT OPTION & CORRECT ANSWER FORMATTING RULES:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 1. DO NOT include prefixes like "A)", "B)", "A.", "B.", "(A)", "(B)", or "Option A:" in optionA, optionB, optionC, optionD fields. Write ONLY the clean option text.
 2. "correctAnswer" MUST be EXACTLY ONE UPPERCASE LETTER: "A", "B", "C", or "D". DO NOT write "Option A", "A)", "a", or the full text.
-3. DOUBLE CHECK ACCURACY: The letter in "correctAnswer" MUST point to the EXACT option key (optionA/B/C/D) containing the correct fact AND MUST MATCH the explanation!
+3. STATEMENT TYPE QUESTIONS MANDATE:
+   - If statements 1, 2, and 3 are ALL true/correct, the "correctAnswer" MUST point to the option containing "1, 2 and 3" or "All of the above" (usually D). NEVER default to "A" if option A is "1 and 2 only"!
+   - If only 1 and 2 are correct, "correctAnswer" MUST be the option with "1 and 2 only".
+4. ASSERTION-REASON QUESTIONS MANDATE:
+   - A = Both (A) and (R) are true, and (R) is the correct explanation of (A).
+   - B = Both (A) and (R) are true, but (R) is NOT the correct explanation of (A).
+   - C = (A) is true, but (R) is false.
+   - D = (A) is false, but (R) is true.
+5. DOUBLE CHECK ACCURACY: The letter in "correctAnswer" MUST strictly match the option key containing the true fact AND MUST MATCH the explanation!
 
 OUTPUT FORMAT — STRICT JSON ONLY. No markdown. Start with { immediately.
 {
@@ -2185,7 +2268,15 @@ STRICT OPTION & CORRECT ANSWER FORMATTING RULES:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 1. DO NOT include prefixes like "A)", "B)", "A.", "B.", "(A)", "(B)", or "Option A:" in optionA, optionB, optionC, optionD fields. Write ONLY the clean option text.
 2. "correctAnswer" MUST be EXACTLY ONE UPPERCASE LETTER: "A", "B", "C", or "D". DO NOT write "Option A", "A)", "a", or the full text.
-3. DOUBLE CHECK ACCURACY: The letter in "correctAnswer" MUST point to the EXACT option key (optionA/B/C/D) containing the correct fact AND MUST MATCH the explanation!
+3. STATEMENT TYPE QUESTIONS MANDATE:
+   - If statements 1, 2, and 3 are ALL true/correct, the "correctAnswer" MUST point to the option containing "1, 2 and 3" or "All of the above" (usually D). NEVER default to "A" if option A is "1 and 2 only"!
+   - If only 1 and 2 are correct, "correctAnswer" MUST be the option with "1 and 2 only".
+4. ASSERTION-REASON QUESTIONS MANDATE:
+   - A = Both (A) and (R) are true, and (R) is the correct explanation of (A).
+   - B = Both (A) and (R) are true, but (R) is NOT the correct explanation of (A).
+   - C = (A) is true, but (R) is false.
+   - D = (A) is false, but (R) is true.
+5. DOUBLE CHECK ACCURACY: The letter in "correctAnswer" MUST strictly match the option key containing the true facts AND MUST MATCH the explanation!
 
 OUTPUT FORMAT — STRICT JSON ONLY. NO markdown. START with { immediately.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -2428,10 +2519,18 @@ MANDATORY RULES:
 1. Difficulty distribution: 30% Easy, 50% Moderate, 20% Hard. Real exam standards.
 2. All 4 options (optionA, optionB, optionC, optionD) MUST be clean text ONLY without prefixes like "A)", "B)", "(A)", "Option A:".
 3. "correctAnswer" MUST be EXACTLY ONE uppercase letter: "A", "B", "C", or "D".
-4. "explanation" MUST clearly explain why the correct option is right AND why wrong options are incorrect.
-5. All distractors must be plausible and well-crafted.
+4. STATEMENT & MULTI-STATEMENT QUESTIONS MANDATE:
+   - If statements 1, 2, and 3 are all true/correct, the "correctAnswer" MUST BE the option containing "1, 2 and 3" or "All of the above" (usually D). NEVER label it as "A" if Option A is "1 and 2 only"!
+   - If only 1 and 2 are correct, "correctAnswer" MUST be the option with "1 and 2 only".
+5. ASSERTION-REASON QUESTIONS MANDATE:
+   - A = Both (A) and (R) are true, and (R) is the correct explanation of (A).
+   - B = Both (A) and (R) are true, but (R) is NOT the correct explanation of (A).
+   - C = (A) is true, but (R) is false.
+   - D = (A) is false, but (R) is true.
+6. "explanation" MUST clearly explain why the correct option is right AND why wrong options are incorrect.
+7. DOUBLE CHECK ACCURACY: The letter in "correctAnswer" MUST strictly point to the option key containing the correct facts AND match the explanation!
 ${specificGuidance}${setInstruction}${sourceInstruction}
-6. STRICT JSON OUTPUT ONLY. Start with { immediately. No markdown fences.
+8. STRICT JSON OUTPUT ONLY. Start with { immediately. No markdown fences.
 
 JSON FORMAT:
 {
