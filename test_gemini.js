@@ -5,7 +5,13 @@ const GEMINI_KEY = process.env.GEMINI_API_KEY;
 const OPENAI_KEY = process.env.OPENAI_API_KEY;
 
 async function testGemini() {
-  const models = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-flash-8b', 'gemini-1.5-pro'];
+  const models = [
+    'gemini-3.5-flash',
+    'gemini-3.5-flash-lite',
+    'gemini-3.1-flash-lite',
+    'gemini-flash-lite-latest',
+    'gemini-3.6-flash'
+  ];
   console.log('🔑 Gemini Key:', GEMINI_KEY ? GEMINI_KEY.substring(0, 10) + '...' : '❌ MISSING');
 
   for (const model of models) {

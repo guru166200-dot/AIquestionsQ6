@@ -115,11 +115,11 @@ function httpPost(hostname, path, headers, body, timeout = 8000) {
 /** Validate Gemini API Key — tries multiple models */
 async function validateGemini(key) {
   const models = [
-    'gemini-2.5-flash',
-    'gemini-2.0-flash',
-    'gemini-1.5-flash',
-    'gemini-1.5-pro',
-    'gemini-1.0-pro',
+    'gemini-3.5-flash-lite',
+    'gemini-3.1-flash-lite',
+    'gemini-flash-lite-latest',
+    'gemini-3.5-flash',
+    'gemini-3.6-flash',
   ];
 
   let lastErr = null;
@@ -214,40 +214,42 @@ async function validateOpenAI(key) {
 
 /** Validate Groq API Key */
 async function validateGroq(key) {
-  try {
-    const res = await httpPost(
-      'api.groq.com',
-      '/openai/v1/chat/completions',
-      { Authorization: `Bearer ${key}` },
-      {
-        model: 'llama-3.3-70b-versatile',
-        messages: [{ role: 'user', content: 'hi' }],
-        max_tokens: 2,
+  const models = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'];
+  for (const model of models) {
+    try {
+      const res = await httpPost(
+        'api.groq.com',
+        '/openai/v1/chat/completions',
+        { Authorization: `Bearer ${key}` },
+        {
+          model,
+          messages: [{ role: 'user', content: 'hi' }],
+          max_tokens: 2,
+        }
+      );
+
+      if (res.status === 200 && res.data.choices) {
+        return { valid: true, detail: `${model} responded successfully` };
       }
-    );
 
-    if (res.status === 200 && res.data.choices) {
-      return { valid: true, detail: 'Llama 3.3 70B responded successfully' };
+      const msg = res.data?.error?.message || `HTTP ${res.status}`;
+
+      if (res.status === 429 || msg.toLowerCase().includes('quota') || msg.toLowerCase().includes('rate')) {
+        return {
+          valid: true,
+          quota: true,
+          detail: `Key is VALID — rate limited (free tier). ${msg}`,
+        };
+      }
+
+      if (res.status === 401 || msg.toLowerCase().includes('invalid')) {
+        return { valid: false, detail: `Invalid API key: ${msg}` };
+      }
+    } catch (e) {
+      // Continue to next model
     }
-
-    const msg = res.data?.error?.message || `HTTP ${res.status}`;
-
-    if (res.status === 429 || msg.toLowerCase().includes('quota') || msg.toLowerCase().includes('rate')) {
-      return {
-        valid: true,
-        quota: true,
-        detail: `Key is VALID — rate limited (free tier). ${msg}`,
-      };
-    }
-
-    if (res.status === 401 || msg.toLowerCase().includes('invalid')) {
-      return { valid: false, detail: `Invalid API key: ${msg}` };
-    }
-
-    return { valid: false, detail: msg };
-  } catch (e) {
-    return { valid: false, detail: `Network error: ${e.message}` };
   }
+  return { valid: false, detail: 'Failed to connect to Groq models' };
 }
 
 /** Validate OpenRouter API Key */

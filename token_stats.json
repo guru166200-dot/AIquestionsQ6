@@ -1,20 +1,20 @@
 {
-  "totalPromptTokens": 2195,
-  "totalCompletionTokens": 3082,
-  "totalTokens": 10965,
-  "totalRequests": 1,
+  "totalPromptTokens": 7544,
+  "totalCompletionTokens": 10905,
+  "totalTokens": 24137,
+  "totalRequests": 6,
   "lastTestTokens": {
-    "promptTokens": 2195,
-    "completionTokens": 3082,
-    "totalTokens": 10965,
-    "model": "Gemini (gemini-3.5-flash)"
+    "promptTokens": 1279,
+    "completionTokens": 1776,
+    "totalTokens": 3055,
+    "model": "Gemini (gemini-3.5-flash-lite)"
   },
   "byModel": {
     "gemini": {
-      "requests": 1,
-      "promptTokens": 2195,
-      "completionTokens": 3082,
-      "totalTokens": 10965
+      "requests": 6,
+      "promptTokens": 7544,
+      "completionTokens": 10905,
+      "totalTokens": 24137
     },
     "groq": {
       "requests": 0,
@@ -23,6 +23,12 @@
       "totalTokens": 0
     },
     "openai": {
+      "requests": 0,
+      "promptTokens": 0,
+      "completionTokens": 0,
+      "totalTokens": 0
+    },
+    "openrouter": {
       "requests": 0,
       "promptTokens": 0,
       "completionTokens": 0,

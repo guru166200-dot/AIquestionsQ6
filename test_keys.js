@@ -36,7 +36,13 @@ async function testGemini() {
   }
   console.log('\nTesting Gemini Key:', key.substring(0, 10) + '...');
   
-  const models = ['gemini-1.5-flash', 'gemini-1.5-flash-8b', 'gemini-2.0-flash', 'gemini-2.5-flash'];
+  const models = [
+    'gemini-3.5-flash',
+    'gemini-3.5-flash-lite',
+    'gemini-3.1-flash-lite',
+    'gemini-flash-lite-latest',
+    'gemini-3.6-flash'
+  ];
   for (const model of models) {
     try {
       const res = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, {

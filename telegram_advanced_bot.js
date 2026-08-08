@@ -22,6 +22,7 @@ const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 let NOTION_KEY = process.env.NOTION_API_KEY;
 let NOTION_PARENT_DB = process.env.NOTION_PARENT_DB;
 let GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+let GROQ_API_KEY = process.env.GROQ_API_KEY;
 let OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 let OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const ADMIN_ID = process.env.ADMIN_ID ? parseInt(process.env.ADMIN_ID) : null;
@@ -38,13 +39,20 @@ if (!TOKEN) {
 if (!NOTION_KEY || !NOTION_PARENT_DB) {
   console.warn("⚠️ WARNING: Notion credentials are not fully set. Notion features might fail.");
 }
-if (!GEMINI_API_KEY && !OPENAI_API_KEY && !process.env.GROQ_API_KEY && !OPENROUTER_API_KEY) {
+if (!GEMINI_API_KEY && !OPENAI_API_KEY && !GROQ_API_KEY && !OPENROUTER_API_KEY) {
   console.warn("⚠️ WARNING: No AI API keys (Gemini/OpenAI/Groq/OpenRouter) found. Question generation will fail.");
 }
 
 function updateEnvFile(key, value) {
   try {
     process.env[key] = value;
+    if (key === 'GEMINI_API_KEY') GEMINI_API_KEY = value;
+    if (key === 'GROQ_API_KEY') GROQ_API_KEY = value;
+    if (key === 'OPENAI_API_KEY') OPENAI_API_KEY = value;
+    if (key === 'OPENROUTER_API_KEY') OPENROUTER_API_KEY = value;
+    if (key === 'NOTION_API_KEY') NOTION_KEY = value;
+    if (key === 'NOTION_PARENT_DB') NOTION_PARENT_DB = value;
+
     let envContent = fs.existsSync('.env') ? fs.readFileSync('.env', 'utf8') : '';
 
     const regex = new RegExp(`^${key}=.*`, 'm');
@@ -155,24 +163,47 @@ async function getLiveTokenStatus(forceRefresh = false) {
     status.gemini = { ok: false, details: '❌ Key Missing' };
   } else {
     try {
-      const model = LAST_WORKING_GEMINI_MODEL || 'gemini-3.6-flash';
-      const res = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
-        { contents: [{ parts: [{ text: 'hi' }] }] },
-        { timeout: 5000 }
-      );
-      if (res.data.candidates) {
-        status.gemini = { ok: true, details: `🟢 ACTIVE (${model})` };
+      const geminiModels = ['gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-flash-lite-latest', 'gemini-3.6-flash'];
+      const modelToTest = LAST_WORKING_GEMINI_MODEL || geminiModels[0];
+      let workingModel = null;
+      let lastErr = null;
+
+      for (const m of [modelToTest, ...geminiModels.filter(m => m !== modelToTest)]) {
+        try {
+          const res = await axios.post(
+            `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${geminiKey}`,
+            { contents: [{ parts: [{ text: 'hi' }] }] },
+            { timeout: 5000 }
+          );
+          if (res.data.candidates) {
+            workingModel = m;
+            LAST_WORKING_GEMINI_MODEL = m;
+            break;
+          }
+        } catch (e) {
+          lastErr = e;
+          const status = e.response?.status;
+          if (status === 400 || status === 401 || status === 403) {
+            const msg = e.response?.data?.error?.message || '';
+            if (msg.includes('API key not valid') || msg.includes('invalid')) break;
+          }
+        }
+      }
+
+      if (workingModel) {
+        status.gemini = { ok: true, details: `🟢 ACTIVE (${workingModel})` };
+      } else {
+        const err = lastErr?.response?.data?.error?.message || lastErr?.message || 'Error';
+        if (err.includes('quota') || lastErr?.response?.status === 429) {
+          status.gemini = { ok: false, details: '🔴 Quota Exceeded' };
+        } else if (err.includes('API key not valid') || err.includes('invalid')) {
+          status.gemini = { ok: false, details: '❌ Invalid Key' };
+        } else {
+          status.gemini = { ok: false, details: `⚠️ ${err.slice(0, 20)}` };
+        }
       }
     } catch (e) {
-      const err = e.response?.data?.error?.message || e.message;
-      if (err.includes('quota') || e.response?.status === 429) {
-        status.gemini = { ok: false, details: '🔴 Quota Exceeded' };
-      } else if (err.includes('API key not valid') || err.includes('invalid')) {
-        status.gemini = { ok: false, details: '❌ Invalid Key' };
-      } else {
-        status.gemini = { ok: false, details: `⚠️ ${err.slice(0, 20)}` };
-      }
+      status.gemini = { ok: false, details: `⚠️ Error` };
     }
   }
 
@@ -1027,6 +1058,22 @@ async function saveQuestionToNotion(topicPageId, question, questionIndex) {
 
 // ==================== AI QUESTION GENERATION ====================
 
+function cleanOption(text, letter) {
+  if (!text) return '';
+  let str = String(text).trim();
+  str = str.replace(new RegExp(`^(?:Option\\s*)?\\(?${letter}\\)?[:.\\-\\s]+`, 'i'), '');
+  str = str.replace(/^(?:Option\s*)?[A-D][:.\\-\\s]+/i, '');
+  str = str.replace(/^\([A-D]\)\s*/i, '');
+  str = str.replace(/^[1-4][:.\\-\\s]+/i, '');
+  str = str.replace(/^\([1-4]\)\s*/i, '');
+  return str.trim();
+}
+
+function normalizeNumberOrText(val) {
+  if (!val) return '';
+  return String(val).toLowerCase().replace(/[^a-z0-9]/g, '').trim();
+}
+
 /**
  * Comprehensive 8-Layer Verification Engine for AI Question & Answer Accuracy:
  * - Layer 1: Option Sanitization & Prefix Cleaning (Strips "A) ", "Option A: ", "(1) ")
@@ -1611,8 +1658,13 @@ MANDATORY:
  * Simulates the exact difficulty, topics, and pattern of a specific exam year
  */
 async function generatePyqYearQuestions(examCatalogKey, year, section, subject, count, batchIndex = 0, onProgress = null) {
-  const catalog = PYQ_EXAM_CATALOG[examCatalogKey];
+  const catalog = (typeof examCatalogKey === 'object' && examCatalogKey !== null) 
+    ? examCatalogKey 
+    : (PYQ_EXAM_CATALOG[examCatalogKey] || PYQ_EXAM_CATALOG['SSC_CGL']);
   if (!catalog) return null;
+  if (!catalog.marking) catalog.marking = { positive: 2, negative: 0.5 };
+  if (!catalog.startYear) catalog.startYear = 2015;
+  if (!catalog.fullName) catalog.fullName = catalog.name || 'Official Exam';
 
   const BATCH_SIZE = 5;
   const totalBatches = Math.ceil(count / BATCH_SIZE);
@@ -1627,7 +1679,16 @@ async function generatePyqYearQuestions(examCatalogKey, year, section, subject, 
     let batchResult = null;
 
     // Gemini primary
-    const allGeminiModels = ['gemini-3.6-flash','gemini-3.5-flash','gemini-flash-latest','gemini-2.5-flash','gemini-2.0-flash','gemini-1.5-flash','gemini-1.5-pro'];
+    const allGeminiModels = [
+      'gemini-3.5-flash-lite',
+      'gemini-3.1-flash-lite',
+      'gemini-flash-lite-latest',
+      'gemini-3.5-flash',
+      'gemini-3.6-flash',
+      'gemini-flash-latest',
+      'gemma-4-31b-it',
+      'gemma-4-26b-a4b-it'
+    ];
     const modelsToTry = LAST_WORKING_GEMINI_MODEL
       ? [LAST_WORKING_GEMINI_MODEL, ...allGeminiModels.filter(m => m !== LAST_WORKING_GEMINI_MODEL)]
       : allGeminiModels;
@@ -1639,9 +1700,9 @@ async function generatePyqYearQuestions(examCatalogKey, year, section, subject, 
           {
             systemInstruction: { parts: [{ text: sysPrompt }] },
             contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
-            generationConfig: { responseMimeType: 'application/json', temperature: 0.7, topP: 0.95, maxOutputTokens: 8192 }
+            generationConfig: { responseMimeType: 'application/json', temperature: 0.7, topP: 0.95, maxOutputTokens: 4096 }
           },
-          { headers: { 'Content-Type': 'application/json' }, timeout: 90000 }
+          { headers: { 'Content-Type': 'application/json' }, timeout: 35000 }
         );
         const data = response.data;
         if (data.candidates && data.candidates[0] && data.candidates[0].content) {
@@ -1656,23 +1717,23 @@ async function generatePyqYearQuestions(examCatalogKey, year, section, subject, 
         }
       } catch (e) {
         if (model === LAST_WORKING_GEMINI_MODEL) LAST_WORKING_GEMINI_MODEL = null;
-        console.warn(`[PYQ] Gemini ${model} failed: ${e.message}`);
+        console.warn(`[PYQ] Gemini ${model} failed: ${e.response?.data?.error?.message || e.message}`);
       }
     }
 
     // Fallback: Groq
     if (!batchResult) {
-      const groqKey = process.env.GROQ_API_KEY;
+      const groqKey = process.env.GROQ_API_KEY || GROQ_API_KEY;
       if (groqKey) {
-        for (const model of ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'llama-3.1-70b-versatile']) {
+        for (const model of ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant']) {
           try {
             const resp = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
               model, response_format: { type: 'json_object' },
               messages: [{ role: 'system', content: sysPrompt }, { role: 'user', content: userPrompt }],
-              max_tokens: 4096,
+              max_tokens: 3500,
               temperature: 0.7
-            }, { headers: { 'Authorization': `Bearer ${groqKey}`, 'Content-Type': 'application/json' }, timeout: 60000 });
-            const parsed = safeParseJSON(resp.data.choices[0].message.content);
+            }, { headers: { 'Authorization': `Bearer ${groqKey}`, 'Content-Type': 'application/json' }, timeout: 35000 });
+            const parsed = safeParseJSON(resp.data.choices[0]?.message?.content);
             if (parsed && parsed.questions && parsed.questions.length > 0) {
               batchResult = { questions: parsed.questions, modelUsed: `Groq (${model})` };
               break;
@@ -1689,8 +1750,8 @@ async function generatePyqYearQuestions(examCatalogKey, year, section, subject, 
           const resp = await axios.post('https://api.openai.com/v1/chat/completions', {
             model, response_format: { type: 'json_object' },
             messages: [{ role: 'system', content: sysPrompt }, { role: 'user', content: userPrompt }]
-          }, { headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_API_KEY}` }, timeout: 60000 });
-          const parsed = safeParseJSON(resp.data.choices[0].message.content);
+          }, { headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_API_KEY}` }, timeout: 35000 });
+          const parsed = safeParseJSON(resp.data.choices[0]?.message?.content);
           if (parsed && parsed.questions && parsed.questions.length > 0) {
             batchResult = { questions: parsed.questions, modelUsed: `ChatGPT (${model})` };
             break;
@@ -1714,9 +1775,9 @@ async function generatePyqYearQuestions(examCatalogKey, year, section, subject, 
               'HTTP-Referer': 'https://examvault.app',
               'X-Title': 'ExamVault Bot'
             }, 
-            timeout: 60000 
+            timeout: 35000 
           });
-          const parsed = safeParseJSON(resp.data.choices[0].message.content);
+          const parsed = safeParseJSON(resp.data.choices[0]?.message?.content);
           if (parsed && parsed.questions && parsed.questions.length > 0) {
             batchResult = { questions: parsed.questions, modelUsed: `OpenRouter (${model})` };
             const usage = resp.data.usage || {};
@@ -2185,94 +2246,76 @@ async function generateMockSectionQuestions(exam, section, subject, count, patte
     let batchResult = null;
 
     // Try Gemini first
-    const allGeminiModels = [
-      'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-flash-latest',
-      'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'
-    ];
-    const modelsToTry = LAST_WORKING_GEMINI_MODEL
-      ? [LAST_WORKING_GEMINI_MODEL, ...allGeminiModels.filter(m => m !== LAST_WORKING_GEMINI_MODEL)]
-      : allGeminiModels;
+    const geminiKey = process.env.GEMINI_API_KEY || GEMINI_API_KEY;
+    if (geminiKey) {
+      const allGeminiModels = [
+        'gemini-3.5-flash-lite',
+        'gemini-3.1-flash-lite',
+        'gemini-flash-lite-latest',
+        'gemini-3.5-flash',
+        'gemini-3.6-flash',
+        'gemini-flash-latest',
+        'gemma-4-31b-it',
+        'gemma-4-26b-a4b-it'
+      ];
+      const modelsToTry = LAST_WORKING_GEMINI_MODEL
+        ? [LAST_WORKING_GEMINI_MODEL, ...allGeminiModels.filter(m => m !== LAST_WORKING_GEMINI_MODEL)]
+        : allGeminiModels;
 
-    for (const model of modelsToTry) {
-      try {
-        const response = await axios.post(
-          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
-          {
-            systemInstruction: { parts: [{ text: sysPrompt }] },
-            contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
-            generationConfig: {
-              responseMimeType: 'application/json',
-              temperature: 0.75,
-              topP: 0.95,
-              maxOutputTokens: 8192
+      for (const model of modelsToTry) {
+        try {
+          const response = await axios.post(
+            `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
+            {
+              systemInstruction: { parts: [{ text: sysPrompt }] },
+              contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+              generationConfig: {
+                responseMimeType: 'application/json',
+                temperature: 0.7,
+                maxOutputTokens: 4096
+              }
+            },
+            { headers: { 'Content-Type': 'application/json' }, timeout: 35000 }
+          );
+          const data = response.data;
+          if (data.candidates && data.candidates[0] && data.candidates[0].content) {
+            const parsed = safeParseJSON(data.candidates[0].content.parts[0].text);
+            if (parsed && parsed.questions && parsed.questions.length > 0) {
+              LAST_WORKING_GEMINI_MODEL = model;
+              batchResult = { questions: parsed.questions, modelUsed: `Gemini (${model})` };
+              const usage = data.usageMetadata || {};
+              recordTokenUsage(`Gemini (${model})`, { promptTokens: usage.promptTokenCount || 0, completionTokens: usage.candidatesTokenCount || 0, totalTokens: usage.totalTokenCount || 0 });
+              break;
             }
-          },
-          { headers: { 'Content-Type': 'application/json' }, timeout: 90000 }
-        );
-        const data = response.data;
-        if (data.candidates && data.candidates[0] && data.candidates[0].content) {
-          const parsed = safeParseJSON(data.candidates[0].content.parts[0].text);
-          if (parsed && parsed.questions && parsed.questions.length > 0) {
-            LAST_WORKING_GEMINI_MODEL = model;
-            batchResult = { questions: parsed.questions, modelUsed: `Gemini (${model})` };
-            const usage = data.usageMetadata || {};
-            recordTokenUsage(`Gemini (${model})`, { promptTokens: usage.promptTokenCount || 0, completionTokens: usage.candidatesTokenCount || 0, totalTokens: usage.totalTokenCount || 0 });
-            break;
           }
+        } catch (e) {
+          if (model === LAST_WORKING_GEMINI_MODEL) LAST_WORKING_GEMINI_MODEL = null;
         }
-      } catch (e) {
-        console.warn(`[MockGen] Gemini ${model} failed: ${e.response?.data?.error?.message || e.message}`);
-        if (model === LAST_WORKING_GEMINI_MODEL) LAST_WORKING_GEMINI_MODEL = null;
       }
     }
 
     // Fallback: Groq
     if (!batchResult) {
-      const groqKey = process.env.GROQ_API_KEY;
+      const groqKey = process.env.GROQ_API_KEY || GROQ_API_KEY;
       if (groqKey) {
-        const groqModels = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'llama-3.1-70b-versatile'];
+        const groqModels = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'];
         for (const model of groqModels) {
           try {
             const resp = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
               model,
               response_format: { type: 'json_object' },
               messages: [{ role: 'system', content: sysPrompt }, { role: 'user', content: userPrompt }],
-              max_tokens: 4096,
+              max_tokens: 3500,
               temperature: 0.7
-            }, { headers: { 'Authorization': `Bearer ${groqKey}`, 'Content-Type': 'application/json' }, timeout: 60000 });
-            const parsed = safeParseJSON(resp.data.choices[0].message.content);
+            }, { headers: { 'Authorization': `Bearer ${groqKey}`, 'Content-Type': 'application/json' }, timeout: 35000 });
+            const parsed = safeParseJSON(resp.data.choices[0]?.message?.content);
             if (parsed && parsed.questions && parsed.questions.length > 0) {
               batchResult = { questions: parsed.questions, modelUsed: `Groq (${model})` };
               const usage = resp.data.usage || {};
               recordTokenUsage(`Groq (${model})`, { promptTokens: usage.prompt_tokens || 0, completionTokens: usage.completion_tokens || 0, totalTokens: usage.total_tokens || 0 });
               break;
             }
-          } catch (e2) {
-            console.warn(`[MockGen] Groq ${model} failed: ${e2.response?.data?.error?.message || e2.message}`);
-          }
-        }
-      }
-    }
-
-    // Fallback: ChatGPT
-    if (!batchResult && OPENAI_API_KEY) {
-      const gptModels = ['gpt-4o-mini', 'gpt-4o', 'gpt-3.5-turbo'];
-      for (const model of gptModels) {
-        try {
-          const resp = await axios.post('https://api.openai.com/v1/chat/completions', {
-            model,
-            response_format: { type: 'json_object' },
-            messages: [{ role: 'system', content: sysPrompt }, { role: 'user', content: userPrompt }]
-          }, { headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_API_KEY}` }, timeout: 60000 });
-          const parsed = safeParseJSON(resp.data.choices[0].message.content);
-          if (parsed && parsed.questions && parsed.questions.length > 0) {
-            batchResult = { questions: parsed.questions, modelUsed: `ChatGPT (${model})` };
-            const usage = resp.data.usage || {};
-            recordTokenUsage(`ChatGPT (${model})`, { promptTokens: usage.prompt_tokens || 0, completionTokens: usage.completion_tokens || 0, totalTokens: usage.total_tokens || 0 });
-            break;
-          }
-        } catch (e3) {
-          console.warn(`[MockGen] ChatGPT ${model} failed: ${e3.message}`);
+          } catch (e2) {}
         }
       }
     }
@@ -2292,16 +2335,38 @@ async function generateMockSectionQuestions(exam, section, subject, count, patte
               'HTTP-Referer': 'https://examvault.app',
               'X-Title': 'ExamVault Bot'
             }, 
-            timeout: 60000 
+            timeout: 35000 
           });
-          const parsed = safeParseJSON(resp.data.choices[0].message.content);
+          const parsed = safeParseJSON(resp.data.choices[0]?.message?.content);
           if (parsed && parsed.questions && parsed.questions.length > 0) {
             batchResult = { questions: parsed.questions, modelUsed: `OpenRouter (${model})` };
             const usage = resp.data.usage || {};
             recordTokenUsage(`OpenRouter (${model})`, { promptTokens: usage.prompt_tokens || 0, completionTokens: usage.completion_tokens || 0, totalTokens: usage.total_tokens || 0 });
             break;
           }
-        } catch (e4) { console.warn(`[MockGen] OpenRouter ${model} failed: ${e4.message}`); }
+        } catch (e4) {}
+      }
+    }
+
+    // Fallback: ChatGPT
+    const openaiKey = process.env.OPENAI_API_KEY || OPENAI_API_KEY;
+    if (!batchResult && openaiKey) {
+      const gptModels = ['gpt-4o-mini', 'gpt-4o', 'gpt-3.5-turbo'];
+      for (const model of gptModels) {
+        try {
+          const resp = await axios.post('https://api.openai.com/v1/chat/completions', {
+            model,
+            response_format: { type: 'json_object' },
+            messages: [{ role: 'system', content: sysPrompt }, { role: 'user', content: userPrompt }]
+          }, { headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${openaiKey}` }, timeout: 35000 });
+          const parsed = safeParseJSON(resp.data.choices[0]?.message?.content);
+          if (parsed && parsed.questions && parsed.questions.length > 0) {
+            batchResult = { questions: parsed.questions, modelUsed: `ChatGPT (${model})` };
+            const usage = resp.data.usage || {};
+            recordTokenUsage(`ChatGPT (${model})`, { promptTokens: usage.prompt_tokens || 0, completionTokens: usage.completion_tokens || 0, totalTokens: usage.total_tokens || 0 });
+            break;
+          }
+        } catch (e3) {}
       }
     }
 
@@ -2314,13 +2379,6 @@ async function generateMockSectionQuestions(exam, section, subject, count, patte
       if (fallbackBatch && fallbackBatch.questions && fallbackBatch.questions.length > 0) {
         allQuestions.push(...fallbackBatch.questions);
         if (fallbackBatch.modelUsed) modelUsedSet.add(fallbackBatch.modelUsed);
-      } else {
-        console.warn(`[MockGen] Retry 2 for batch ${b + 1} for "${section}"...`);
-        const retryBatch = await generateSingleSetQuestions(section, exam, subject, currentCount, null, b + 50);
-        if (retryBatch && retryBatch.questions && retryBatch.questions.length > 0) {
-          allQuestions.push(...retryBatch.questions);
-          if (retryBatch.modelUsed) modelUsedSet.add(retryBatch.modelUsed);
-        }
       }
     }
 
@@ -2335,358 +2393,68 @@ async function generateMockSectionQuestions(exam, section, subject, count, patte
     questions: allQuestions.slice(0, count),
     modelUsed: Array.from(modelUsedSet).join(', ') || 'AI Mock Engine'
   };
-}
-
-// ==================== END FULL MOCK EXAM PROMPT ENGINE ====================
-
-function getSystemPrompt(exam, subject, topic, count, pastedText = null, seed = "") {
+}function getSystemPrompt(exam, subject, topic, count, pastedText = null, seed = "") {
   const isCurrentAffairs = (subject || '').toLowerCase().includes('current affairs');
-  const yearRange = isCurrentAffairs ? '2024 to 2025' : '2000 to 2025';
+  const yearRange = isCurrentAffairs ? '2024 to 2026' : '2000 to 2026';
   const isBankSetBased = isBankSetBasedHelper(exam, topic);
 
-  const setBasedInstruction = isBankSetBased ? `
-Every block of 5 questions MUST share the EXACT SAME context string.
-For ${count} questions, generate exactly ${Math.ceil(count / 5)} distinct contexts.` : '';
-
-  const sourceInstruction = pastedText ? `
-CRITICAL: GENERATE QUESTIONS ONLY FROM THIS PROVIDED SOURCE TEXT:
---- START SOURCE TEXT ---
-${pastedText}
---- END SOURCE TEXT ---
-
-Your goal is to extract key facts, concepts, and data from the provided text and turn them into exam-standard questions. DO NOT use outside knowledge if it contradicts the text.` : '';
-
-  const varietyInstruction = `
-ANTI-REPETITION & UNIQUENESS RULES:
-- RANDOM SEED ID: [${seed}]
-- AVOID "common" or "obvious" questions that are frequently asked in mocks.
-- Focus on obscure details, deep conceptual links, and diverse sub-topics within ${topic}.
-- Change the focus area with each call. If you previously asked about names, now ask about dates, significance, or impact.
-- Every question must feel fresh and unique. NO REPETITION of concepts from common question banks.`;
-
-  // ===== QUESTION TYPE COUNTS (For Non-Bank Exams) =====
-  let directCount = 0, yearCount = 0, statementCount = 0, assertionCount = 0, matchCount = 0, chronoCount = 0, dataCount = 0;
-  
-  if (exam !== 'Bank') {
-    directCount = Math.max(1, Math.round(count * 0.20)); // ~20% Direct
-    yearCount = Math.max(1, Math.round(count * 0.15)); // ~15% Year
-    statementCount = Math.max(1, Math.round(count * 0.15)); // ~15% Statement
-    assertionCount = Math.max(1, Math.round(count * 0.15)); // ~15% Assertion-Reason
-    matchCount = Math.max(1, Math.round(count * 0.15)); // ~15% Match-the-Following
-    chronoCount = Math.max(1, Math.round(count * 0.10)); // ~10% Chronological
-    dataCount = Math.max(1, Math.round(count * 0.10)); // ~10% Data-Precision
-  }
-
-  // ===== EXAM PAPER REFERENCE ANCHORS =====
-  const pyqSources = {
-    'SSC': 'SSC CGL (2010-2025), SSC CHSL (2012-2025), SSC MTS (2014-2025), SSC GD (2018-2025)',
-    'RRB': 'RRB NTPC (2016-2025), RRB Group D (2018-2025), RRB ALP (2014-2025), RRB JE (2015-2025)',
-    'TNPSC': 'TNPSC Group 1 (2000-2025), Group 2 (2000-2025), Group 2A (2000-2025), Group 4 (2000-2025), VAO (2006-2025)',
-    'Bank': 'IBPS PO (2011-2025), IBPS Clerk (2011-2025), SBI PO (2010-2025), SBI Clerk (2010-2025)',
-    'JE': 'RRB JE (2015-2025), SSC JE (2013-2025), GATE ME (2010-2025), UPSC ESE (2005-2025), PSU Technical Papers (2000-2025)'
-  }[exam] || 'Indian Govt Competitive Exam papers (2000-2025)';
-
-  const examContext = {
-    'SSC': 'SSC CGL, SSC CHSL, SSC MTS, SSC GD Constable — Tier 1 & Tier 2 patterns (2000-2025)',
-    'RRB': 'RRB NTPC, RRB Group D, RRB ALP, RRB JE — CBT 1 & CBT 2 patterns (2000-2025)',
-    'TNPSC': 'TNPSC Group 1, Group 2, Group 2A, Group 4, VAO — Prelims & Mains patterns (2000-2025)',
-    'Bank': 'IBPS PO, IBPS Clerk, SBI PO, SBI Clerk — Prelims & Mains (2000-2025)',
-    'JE': 'RRB JE, SSC JE, GATE ME, UPSC ESE (Mechanical/Production Engineering) — Technical Paper patterns (2000-2025)'
-  }[exam] || 'Indian Competitive Government Exams (2000-2025)';
-
-  const examSpecificRules = {
-    'TNPSC': `
-TNPSC-SPECIFIC MANDATORY RULES:
-- MUST include questions on: Tamil Sangam Literature, Thirukkural, Tamil Nadu history, Tamil culture & festivals, Tamil leaders (Periyar, Ambedkar's impact in TN, MGR, Kamarajar).
-- MUST include: TNPSC standard GK — state symbols, rivers in TN, geography of TN.
-- PYQs: Source from actual TNPSC Group 1/2/4 papers from 2000-2025.
-- Language: Simple English; no complex vocabulary.`,
-    'SSC': `
-SSC-SPECIFIC MANDATORY RULES:
-- MUST include questions from: NCERT 6th-12th (History, Geography, Polity, Economics, Science).
-- MUST include: Indian Polity (Constitution, Parliament, Judiciary), Indian History (Ancient/Medieval/Modern), Geography (physical & political), Science (Physics/Chemistry/Biology basics), Economy.
-- PYQs: Source from actual SSC CGL/CHSL/MTS papers from 2010-2025.
-- Difficulty: SSC Tier-1 standard — moderate difficulty, not too easy, not UPSC-level obscure.`,
-    'RRB': `
-RRB-SPECIFIC MANDATORY RULES:
-- MUST include: Railway-specific GK (history of Indian Railways, types of trains, zones, railway ministers), Science basics (Physics laws, chemical formulas, biology).
-- MUST include: Current Affairs related to Railways, Indian infrastructure, science & tech.
-- PYQs: Source from actual RRB NTPC/Group D/ALP papers from 2016-2025.
-- Language: RRB Tier-1 CBT standard — straightforward language, factual.`,
-    'Bank': `
-BANK-SPECIFIC MANDATORY RULES:
-- MUST include: Banking Awareness, RBI policies, financial terms, Indian economy, government banking schemes.
-- PYQs: Source from actual IBPS PO/Clerk, SBI PO/Clerk papers from 2011-2025.`,
-    'JE': `
-JE (JUNIOR ENGINEER) — SPECIFIC MANDATORY RULES:
-- MUST generate TECHNICAL engineering questions suitable for RRB JE, SSC JE, GATE ME, and UPSC ESE (Mechanical) exams.
-- MUST include: Formulae-based numerical problems, conceptual theory questions, and applied engineering scenarios.
-- Subjects covered: Fluid Mechanics, Thermodynamics, Heat Transfer, Engineering Mechanics, Strength of Materials, Theory of Machines, Design of Machine Elements, Production Engineering, Refrigeration & AC, Power Plant Engineering, IC Engines, Industrial Engineering, Materials Science, CAD/CAM/CIM/FEA.
-- PYQs: Source from actual RRB JE (2015-2025) and SSC JE (2013-2025) papers. Tag each PYQ with source + year.
-- Numerical questions MUST include correct formula, substitute values, and final answer with units.
-- Options for numerical Qs must be realistic close-range values (e.g., differ by 5-15%).
-- Difficulty: JE-standard — formula application, unit analysis, and conceptual depth required.`
-  }[exam] || '';
-
-  const prompt = `You are an ELITE Senior Question Paper Setter with 25+ years of experience creating official question papers for ${examContext}.
-
-Your ONLY task: Generate EXACTLY ${count} questions for the REAL ${exam} EXAMINATION — questions that are INDISTINGUISHABLE from actual official ${exam} papers from ${yearRange}.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-TOPIC: ${topic} | SUBJECT: ${subject} | EXAM: ${exam}
-PYQ SOURCES TO USE: ${pyqSources}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
-
-  let typeInstructions = '';
-  if (exam !== 'Bank') {
-    typeInstructions = `
-╔══════════════════════════════════════════╗
-║  MANDATORY 7 QUESTION TYPES — ALL MUST  ║
-║  APPEAR. MISSING ANY TYPE = FAILURE.    ║
-╚══════════════════════════════════════════╝
-
-【TYPE 1 — DIRECT & FACT-BASED】 EXACTLY ~${directCount} questions
-→ Single-line factual MCQ. All 4 options must be highly plausible close-variants.
-Example: "How many members are nominated by the President to the Rajya Sabha?"
-A) 10   B) 12 ✓   C) 14   D) 16
-
-【TYPE 2 — YEAR & DATE-BASED】 EXACTLY ~${yearCount} questions
-→ Ask WHEN an important event occurred. All 4 year-options must be within 3–5 years of each other.
-Example: "In which year was the Indian Constitution adopted?"
-A) 1948   B) 1949 ✓   C) 1950   D) 1951
-
-【TYPE 3 — STATEMENT TYPE (CBI/UPSC/SSC Style)】 EXACTLY ~${statementCount} questions
-→ Give exactly 3 statements. Ask which are correct.
-→ Options MUST follow this pattern: "1 only / 2 and 3 only / 1 and 3 only / All of the above"
-Format:
-"Consider the following statements about [topic]:
-1. [Statement]
-2. [Statement]  
-3. [Statement]
-Which is/are CORRECT?"
-A) 1 only   B) 2 and 3 only   C) 1 and 3 only   D) All of the above
-
-【TYPE 4 — ASSERTION & REASON】 EXACTLY ~${assertionCount} questions
-→ Options MUST ALWAYS be EXACTLY these 4: A) Both A & R true, R is correct explanation; B) Both A & R true, R not correct explanation; C) A true, R false; D) A false, R true.
-Format:
-"Assertion (A): [Factual assertion]
-Reason (R): [Reasoning]"
-
-【TYPE 5 — MATCH THE FOLLOWING】 EXACTLY ~${matchCount} questions
-→ List I: 4 items (A-D). List II: 4 items (1-4).
-Format:
-"Match List I with List II:
-[List rows]
-Select correct match: A) A-2, B-1, C-4, D-3 ..."
-
-【TYPE 6 — CHRONOLOGICAL ORDER】 EXACTLY ~${chronoCount} questions
-→ List 4 events. Arrange oldest to newest.
-Format: "Arrange in CHRONOLOGICAL order: 1. [A] 2. [B] 3. [C] 4. [D]"
-
-→ Questions with exact numerical/statistical data from official sources.
-`;
-  } else {
-    // Bank-specific instructions
+  let specificGuidance = '';
+  if (exam === 'Bank') {
     if (subject === 'Quants') {
-      typeInstructions = `
-╔══════════════════════════════════════════╗
-║  ARITHMETIC & QUANTS (BANK STANDARD)     ║
-╚══════════════════════════════════════════╝
-For Bank Quants, generate high-standard "Arithmetic / Quants" questions:
-- Word Problems: Realistic banking scenarios based on ${topic}.
-- Calculation Intensive: Require 2-3 precise mathematical steps.
-- CHAIN-OF-THOUGHT MATHEMATICAL PRECISION:
-  1. Identify given variables and units clearly.
-  2. Apply the exact formula without arithmetic drift.
-  3. Compute the exact final value and place it in the option indicated by 'correctAnswer'.
-  4. Distractors must be close-range plausible mathematical traps (within 5-15%).
-- Tag as "Arithmetic".
-
-Format:
-"A person buys [x] at [y]... [Scenario description]. What is the [final value]?"
-A) [Value]  B) [Value]  C) [Value]  D) [Value]
-`;
+      specificGuidance = `• BANK QUANTS: Real-world arithmetic word problems (Percentage, Profit/Loss, SI/CI, Ratio, Time & Work, Speed/Distance). Exact calculation steps in explanation. All 4 options plausible close numerical values. Tag as "Arithmetic".`;
     } else if (subject === 'Reasoning') {
-      typeInstructions = `
-╔══════════════════════════════════════════╗
-║  BANK REASONING (LOGICAL & ANALYTICAL)  ║
-╚══════════════════════════════════════════╝
-STRICT OPTION & CORRECT ANSWER FORMATTING RULES:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-1. DO NOT include prefixes like "A)", "B)", "A.", "B.", "(A)", "(B)", or "Option A:" in optionA, optionB, optionC, optionD fields. Write ONLY the clean option text.
-2. "correctAnswer" MUST be EXACTLY ONE UPPERCASE LETTER: "A", "B", "C", or "D".
-3. DEDUCTIVE RIGOR:
-   - For Puzzles / Seating Arrangements: Provide complete, unambiguous clues that yield EXACTLY ONE unique valid arrangement.
-   - For Syllogisms: Use standard 2-3 statements with conclusions ('Only a few', 'Some', 'All', 'No', 'Possibility').
-   - For Blood Relations & Direction: Trace step-by-step relations or coordinate vectors.
-   - DOUBLE CHECK ACCURACY: The letter in 'correctAnswer' MUST match the derived deduction and the explanation!
-`;
+      specificGuidance = `• BANK REASONING: Unambiguous clues with EXACTLY ONE valid arrangement/solution (Puzzles, Seating, Syllogisms, Direction, Blood Relations). Step-by-step logical proof in explanation. Tag as "Logical Deduction".`;
     } else {
-      typeInstructions = `
-╔══════════════════════════════════════════╗
-║  BANK STANDARD EXAM QUESTIONS          ║
-╚══════════════════════════════════════════╝
-STRICT OPTION & CORRECT ANSWER FORMATTING RULES:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-1. DO NOT include prefixes like "A)", "B)", "A.", "B.", "(A)", "(B)", or "Option A:" in optionA, optionB, optionC, optionD fields. Write ONLY the clean option text.
-2. "correctAnswer" MUST be EXACTLY ONE UPPERCASE LETTER: "A", "B", "C", or "D". DO NOT write "Option A", "A)", "a", or the full text.
-3. DOUBLE CHECK ACCURACY: The letter in "correctAnswer" MUST point to the EXACT option key (optionA/B/C/D) containing the correct fact AND MUST MATCH the explanation!
-
-For this Bank subject (${subject}), generate questions strictly following the latest IBPS/SBI pattern.
-- CRITICAL: NO Statement-type questions.
-- CRITICAL: NO Assertion-Reason questions.
-- CRITICAL: NO Match the Following questions.
-- CRITICAL: NO Chronological Order questions.
-- Focus strictly on: High-speed decision making, conceptual clarity, and bank-specific pattern recognition.
-- For English: Use modern bank context exam patterns.
-`;
+      specificGuidance = `• BANK EXAM STANDARD: High-speed conceptual and practical questions for ${subject}.`;
     }
+  } else if (exam === 'TNPSC') {
+    specificGuidance = `• TNPSC STANDARD: Include Tamil Nadu history, culture, Thirukkural, Sangam literature, state geography, freedom movement in TN, and general studies.`;
+  } else if (exam === 'RRB') {
+    specificGuidance = `• RRB STANDARD: Focus on NCERT science (Physics, Chemistry, Biology), Indian Railways facts, geography, and general awareness.`;
+  } else if (exam === 'JE') {
+    specificGuidance = `• JE TECHNICAL: Engineering problems (Fluid Mechanics, Thermodynamics, SOM, TOM, Machine Design, Production, Material Science). Show formulas and SI units in explanation.`;
+  } else {
+    specificGuidance = `• SSC STANDARD: High-yield questions covering NCERT 6th-12th concepts, Indian polity, history, geography, economy, and general science.`;
   }
 
-  const finalPrompt = prompt + typeInstructions + `
+  const setInstruction = isBankSetBased ? `\n• BANK SET-BASED: Provide 1 shared "context" passage for every set of 5 questions.` : '';
+  const sourceInstruction = pastedText ? `\n• SOURCE TEXT: Generate questions ONLY from this provided text:\n${pastedText}\n` : '';
 
-${setBasedInstruction}
+  return `You are a Senior Question Paper Setter creating official MCQs for ${exam} examination (${subject}).
+Generate EXACTLY ${count} high-standard multiple-choice questions for topic: "${topic}".
+Unique seed: [${seed}] | Period: ${yearRange}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-CONTENT DISTRIBUTION (ALL MANDATORY):
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-• 40% PYQs (2000-2025): REAL questions from actual ${exam} papers listed above.
-  Tag each PYQ with exact source: exam name + year (e.g., "SSC CGL 2019 PYQ").
-• 30% HIGH-PROBABILITY MCQs: Most-repeated concepts from ${exam} pattern. Tag as "High Probability".
-• 30% FUTURE EXPECTED: Prediction based on 2025 trends. Tag as "Expected 2025-2026".
+MANDATORY RULES:
+1. Difficulty distribution: 30% Easy, 50% Moderate, 20% Hard. Real exam standards.
+2. All 4 options (optionA, optionB, optionC, optionD) MUST be clean text ONLY without prefixes like "A)", "B)", "(A)", "Option A:".
+3. "correctAnswer" MUST be EXACTLY ONE uppercase letter: "A", "B", "C", or "D".
+4. "explanation" MUST clearly explain why the correct option is right AND why wrong options are incorrect.
+5. All distractors must be plausible and well-crafted.
+${specificGuidance}${setInstruction}${sourceInstruction}
+6. STRICT JSON OUTPUT ONLY. Start with { immediately. No markdown fences.
 
-${exam !== 'Bank' ? `DIFFICULTY PROGRESSION (STRICT ORDER):
-• Questions 1 to ${Math.round(count * 0.2)}: EASY — Types 1 & 2 (Direct facts, Year questions)
-• Questions ${Math.round(count * 0.2) + 1} to ${Math.round(count * 0.6)}: MODERATE — Types 3, 5, 7 (Statement, Match, Data)
-• Questions ${Math.round(count * 0.6) + 1} to ${count}: HARD — Types 4 & 6 (Assertion-Reason, Chronological)` 
-: `DIFFICULTY PROGRESSION:
-- Mix of Easy, Moderate, and Hard questions throughout the set to simulate a real banking exam experience.`}
-
-${examSpecificRules}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-QUALITY STANDARDS (NON-NEGOTIABLE):
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-✗ NO trivial or kindergarten-level questions.
-✗ NO obviously wrong distractors (all 4 options must mislead an unprepared candidate).
-✗ NO repeated questions or duplicate concepts.
-✗ NO vague or ambiguous question stems.
-✓ Each explanation must say WHY correct answer is right AND WHY each wrong option is wrong.
-${isCurrentAffairs ? '✓ CURRENT AFFAIRS ONLY: Strictly 2024 and 2025 events. Include appointments, awards, summits, schemes, reports.' : ''}
-
-${exam !== 'Bank' ? `SELF-VERIFICATION (before outputting JSON, check these):
-□ Have I included at least ${directCount} Direct questions?
-□ Have I included at least ${yearCount} Year/Date questions?
-□ Have I included at least ${statementCount} Statement questions (with 3 statements each)?
-□ Have I included at least ${assertionCount} Assertion-Reason questions (with standard A/B/C/D)?
-□ Have I included at least ${matchCount} Match-the-Following questions (List I & II, 4 pairs)?
-□ Have I included at least ${chronoCount} Chronological Order questions (exactly 4 events)?
-□ Have I included at least ${dataCount} Data/Precision questions (with verifiable stats)?
-If any box is unchecked — REGENERATE that type before outputting.` : `SELF-VERIFICATION:
-□ Are all questions strictly based on the ${exam} pattern for ${subject}?
-${subject === 'Quants' ? '□ Are all questions Arithmetic Type word problems?' : ''}`}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-OUTPUT FORMAT — VALID JSON ONLY. NO MARKDOWN. START WITH { IMMEDIATELY.
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+JSON FORMAT:
 {
   "questions": [
     {
-${isBankSetBased ? '      "context": "Common passage/context (REQUIRED for every 5 questions in Bank set-based topics)",\n' : ''}      "type": "${exam === 'Bank' ? (subject === 'Quants' ? 'Arithmetic' : 'Bank Standard') : 'Direct|Year|Statement|Assertion-Reason|Match|Chronological|Data'}",
-      "question": "Full question text formatted exactly as per the type rules above",
-      "optionA": "Plausible option A",
-      "optionB": "Plausible option B",
-      "optionC": "Plausible option C",
-      "optionD": "Plausible option D",
+      ${isBankSetBased ? '"context": "Shared context string for 5 questions",\n      ' : ''}"type": "${exam === 'Bank' ? (subject === 'Quants' ? 'Arithmetic' : 'Bank Standard') : 'Direct|Year|Statement|Assertion-Reason|Match|Chronological'}",
+      "question": "Clear question text",
+      "optionA": "Option A text",
+      "optionB": "Option B text",
+      "optionC": "Option C text",
+      "optionD": "Option D text",
       "correctAnswer": "A",
-      "explanation": "✅ Correct: [why this is right]. ❌ A/B/C/D wrong: [brief reason for each wrong option]",
+      "explanation": "✅ Correct: [reason]. ❌ Other options: [reason]",
       "difficulty": "Easy|Moderate|Hard",
-      "trick": "Memory trick or mnemonic (leave empty string if none)",
-      "pyqTag": "SSC CGL 2019 PYQ | TNPSC Group 2 2022 PYQ | High Probability | Expected 2025-2026"
+      "trick": "Mnemonic or shortcut (empty string if none)",
+      "pyqTag": "${exam} Exam Standard"
     }
   ]
-}
-
-${sourceInstruction}
-
-${varietyInstruction}
-
-FINAL REMINDER: Every single question must be something that could appear in the actual ${exam} official paper. No shortcuts. No filler. Highest exam standard only.`;
-
-  return finalPrompt;
+}`;
 }
 
 function getUserPrompt(exam, subject, topic, count, pastedText = null, seed = "") {
-  const isCurrentAffairs = (subject || '').toLowerCase().includes('current affairs');
-  const yearRange = isCurrentAffairs ? '2024 to 2025' : '2000 to 2025';
-  const isBankSetBased = isBankSetBasedHelper(exam, topic);
-
-  const varietyInst = `
-DIVERSITY REQUIREMENT:
-The seed for this generation is ${seed}. Use this to explore a UNIQUE set of facts within ${topic}. Avoid repeating typical questions. Focus on the nuances.`;
-
-  let typeSpecificPrompt = '';
-  if (exam !== 'Bank') {
-    const d = Math.max(1, Math.round(count * 0.20));
-    const y = Math.max(1, Math.round(count * 0.15));
-    const s = Math.max(1, Math.round(count * 0.15));
-    const a = Math.max(1, Math.round(count * 0.15));
-    const m = Math.max(1, Math.round(count * 0.15));
-    const c = Math.max(1, Math.round(count * 0.10));
-    const dt = Math.max(1, Math.round(count * 0.10));
-
-    typeSpecificPrompt = `
-ALL 7 QUESTION TYPES ARE MANDATORY — YOU MUST INCLUDE EVERY TYPE:
-1️⃣ DIRECT & FACT-BASED ............. ~${d} questions  [EASY]
-2️⃣ YEAR & DATE-BASED ............... ~${y} questions  [EASY]
-3️⃣ STATEMENT TYPE .................. ~${s} questions  [MODERATE]  
-4️⃣ ASSERTION & REASON .............. ~${a} questions  [HARD]
-5️⃣ MATCH THE FOLLOWING ............. ~${m} questions  [MODERATE]
-6️⃣ CHRONOLOGICAL ORDER ............. ~${c} questions  [HARD]
-7️⃣ DATA & PRECISION-BASED .......... ~${dt} questions [MODERATE]
-
-CRITICAL REQUIREMENTS:
-• Questions 1-${Math.round(count * 0.2)}: EASY (Direct + Year types)
-• Questions ${Math.round(count * 0.2) + 1}-${Math.round(count * 0.6)}: MODERATE (Statement + Match + Data types)
-• Questions ${Math.round(count * 0.6) + 1}-${count}: HARD (Assertion-Reason + Chronological types)`;
-  } else {
-    // Bank specific
-    if (subject === 'Quants') {
-      typeSpecificPrompt = `
-ARITHMETIC TYPE MANDATORY (BANK QUANTS):
-• Every single question MUST be an "Arithmetic Type" word problem scenario.
-• DO NOT include Statement-type, Assertion-Reason, Match the Following, or Chronological questions.
-• Focus on scenarios, logical application, and numerical values typical of IBPS/SBI PO/Clerk exams.
-• Tag each question type as "Arithmetic".`;
-    } else {
-      typeSpecificPrompt = `
-BANK EXAM STANDARD:
-• Follow the IBPS/SBI pattern for ${subject}.
-• STRICTLY EXCLUDE: Statement-type, Assertion-Reason, Match the Following, and Chronological Order questions.
-• Tag as "Bank Standard".`;
-    }
-  }
-
-  let prompt = `I need EXACTLY ${count} REAL ${exam} EXAM STANDARD questions on:
-Topic: "${topic}" | Subject: ${subject} | Year Range: ${yearRange}
-
-${pastedText ? `ONLY USE THIS SOURCE TEXT TO GENERATE QUESTIONS:\n\n${pastedText}` : ''}
-
-${varietyInst}
-
-${typeSpecificPrompt}
-
-CRITICAL REQUIREMENTS:
-• 40% must be REAL PYQs from actual ${exam} papers (${yearRange}) — tag with paper name + year
-• All 4 options must each be plausible — no obviously wrong distractors
-• Explanation must state WHY correct is right AND WHY each wrong option is incorrect
-• RETURN EXACTLY ${count} QUESTIONS — not fewer, not more`;
-
-  if (isBankSetBased) {
-    prompt += `\n\n🏦 BANK SET-BASED RULE: Group questions in sets of 5 with 1 shared context per set. Total contexts needed: ${Math.ceil(count / 5)}.`;
-  }
-
-  return prompt;
+  return `Generate EXACTLY ${count} official-standard ${exam} MCQs for topic: "${topic}" (${subject}). Seed: [${seed}]. Return strict JSON with exactly ${count} questions.`;
 }
 
 
@@ -2694,23 +2462,22 @@ CRITICAL REQUIREMENTS:
  * Generate questions using Gemini API (with multiple model version fallbacks)
  */
 async function generateQuestionsWithGemini(topic, exam, subject, count = 10, pastedText = null, customSeed = null) {
+  const geminiKey = process.env.GEMINI_API_KEY || GEMINI_API_KEY;
+  if (!geminiKey) return null;
   const seed = customSeed || (Date.now().toString(36) + Math.random().toString(36).substring(2, 7));
   
-  // Comprehensive list of available Gemini models
+  // Active fast models
   const allModels = [
-    'gemini-3.6-flash',
+    'gemini-3.5-flash-lite',
+    'gemini-3.1-flash-lite',
+    'gemini-flash-lite-latest',
     'gemini-3.5-flash',
+    'gemini-3.6-flash',
     'gemini-flash-latest',
-    'gemma-4-26b-a4b-it',
     'gemma-4-31b-it',
-    'gemini-2.5-flash',
-    'gemini-2.0-flash',
-    'gemini-1.5-flash',
-    'gemini-1.5-flash-8b',
-    'gemini-1.5-pro'
+    'gemma-4-26b-a4b-it'
   ];
 
-  // Prioritize the last working model if we have one
   const modelsToTry = LAST_WORKING_GEMINI_MODEL 
     ? [LAST_WORKING_GEMINI_MODEL, ...allModels.filter(m => m !== LAST_WORKING_GEMINI_MODEL)]
     : allModels;
@@ -2719,17 +2486,17 @@ async function generateQuestionsWithGemini(topic, exam, subject, count = 10, pas
     try {
       console.log(`Trying Gemini model: ${model}...`);
       const response = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
         {
           systemInstruction: { parts: [{ text: getSystemPrompt(exam, subject, topic, count, pastedText, seed) }] },
           contents: [{ role: 'user', parts: [{ text: getUserPrompt(exam, subject, topic, count, pastedText, seed) }] }],
           generationConfig: { 
             responseMimeType: 'application/json',
             temperature: 0.7,
-            topP: 0.95
+            maxOutputTokens: 4096
           }
         },
-        { headers: { 'Content-Type': 'application/json' }, timeout: 60000 }
+        { headers: { 'Content-Type': 'application/json' }, timeout: 35000 }
       );
 
       const data = response.data;
@@ -2738,7 +2505,7 @@ async function generateQuestionsWithGemini(topic, exam, subject, count = 10, pas
         const parsed = safeParseJSON(text);
         if (parsed && parsed.questions && parsed.questions.length > 0) {
           console.log(`✅ Success with Gemini model: ${model}`);
-          LAST_WORKING_GEMINI_MODEL = model; // Remember this model for next time
+          LAST_WORKING_GEMINI_MODEL = model;
 
           const usage = data.usageMetadata || {};
           const p = usage.promptTokenCount || 0;
@@ -2753,28 +2520,23 @@ async function generateQuestionsWithGemini(topic, exam, subject, count = 10, pas
     } catch (error) {
       const errorMsg = error.response?.data?.error?.message || error.message;
       console.warn(`⚠️ Model ${model} failed: ${errorMsg}`);
-      
-      // If we used the LAST_WORKING_GEMINI_MODEL and it failed, reset it
       if (model === LAST_WORKING_GEMINI_MODEL) {
         LAST_WORKING_GEMINI_MODEL = null;
       }
     }
   }
 
-  return null; // All Gemini models failed
+  return null;
 }
 
 /**
- * Generate questions using ChatGPT API (with multiple model version fallbacks)
+ * Generate questions using ChatGPT API
  */
 async function generateQuestionsWithChatGPT(topic, exam, subject, count = 10, pastedText = null, customSeed = null) {
+  const openaiKey = process.env.OPENAI_API_KEY || OPENAI_API_KEY;
+  if (!openaiKey) return null;
   const seed = customSeed || (Date.now().toString(36) + Math.random().toString(36).substring(2, 7));
-  const models = [
-    'gpt-4o-mini',
-    'gpt-4o',
-    'gpt-4-turbo',
-    'gpt-3.5-turbo'
-  ];
+  const models = ['gpt-4o-mini', 'gpt-4o', 'gpt-3.5-turbo'];
 
   for (const model of models) {
     try {
@@ -2792,8 +2554,9 @@ async function generateQuestionsWithChatGPT(topic, exam, subject, count = 10, pa
         {
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${OPENAI_API_KEY}`
-          }
+            'Authorization': `Bearer ${openaiKey}`
+          },
+          timeout: 35000
         }
       );
 
@@ -2815,7 +2578,7 @@ async function generateQuestionsWithChatGPT(topic, exam, subject, count = 10, pa
         }
       }
     } catch (error) {
-      console.warn(`⚠️ ChatGPT model ${model} failed or unavailable: ${error.message}`);
+      console.warn(`⚠️ ChatGPT model ${model} failed: ${error.message}`);
     }
   }
 
@@ -2823,13 +2586,13 @@ async function generateQuestionsWithChatGPT(topic, exam, subject, count = 10, pa
 }
 
 /**
- * Generate questions with fallback logic
+ * Generate questions with Groq API
  */
 async function generateQuestionsWithGroq(topic, exam, subject, count = 10, pastedText = null, customSeed = null) {
-  const groqKey = process.env.GROQ_API_KEY;
+  const groqKey = process.env.GROQ_API_KEY || GROQ_API_KEY;
   if (!groqKey) return null;
   const seed = customSeed || Date.now().toString(36);
-  const models = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'llama-3.1-70b-versatile'];
+  const models = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'];
   for (const model of models) {
     try {
       console.log(`Trying Groq model: ${model}...`);
@@ -2840,10 +2603,10 @@ async function generateQuestionsWithGroq(topic, exam, subject, count = 10, paste
           { role: 'system', content: getSystemPrompt(exam, subject, topic, count, pastedText, seed) },
           { role: 'user', content: getUserPrompt(exam, subject, topic, count, pastedText, seed) }
         ],
-        max_tokens: 4096,
+        max_tokens: 3500,
         temperature: 0.7
-      }, { headers: { 'Authorization': `Bearer ${groqKey}`, 'Content-Type': 'application/json' }, timeout: 60000 });
-      const text = response.data.choices[0].message.content;
+      }, { headers: { 'Authorization': `Bearer ${groqKey}`, 'Content-Type': 'application/json' }, timeout: 35000 });
+      const text = response.data.choices[0]?.message?.content;
       const parsed = safeParseJSON(text);
       if (parsed && parsed.questions && parsed.questions.length > 0) {
         console.log(`✅ Success with Groq model: ${model}`);
@@ -2865,7 +2628,7 @@ async function generateQuestionsWithGroq(topic, exam, subject, count = 10, paste
 }
 
 /**
- * Generate questions using OpenRouter API (with multiple free model fallbacks)
+ * Generate questions using OpenRouter API
  */
 async function generateQuestionsWithOpenRouter(topic, exam, subject, count = 10, pastedText = null, customSeed = null) {
   const openrouterKey = process.env.OPENROUTER_API_KEY || OPENROUTER_API_KEY;
@@ -2899,7 +2662,7 @@ async function generateQuestionsWithOpenRouter(topic, exam, subject, count = 10,
             'HTTP-Referer': 'https://examvault.app',
             'X-Title': 'ExamVault Bot'
           },
-          timeout: 60000
+          timeout: 35000
         }
       );
 
@@ -2921,7 +2684,7 @@ async function generateQuestionsWithOpenRouter(topic, exam, subject, count = 10,
         }
       }
     } catch (error) {
-      console.warn(`⚠️ OpenRouter model ${model} failed or unavailable: ${error.message}`);
+      console.warn(`⚠️ OpenRouter model ${model} failed: ${error.message}`);
     }
   }
 
@@ -2929,7 +2692,7 @@ async function generateQuestionsWithOpenRouter(topic, exam, subject, count = 10,
 }
 
 /**
- * Generate a single set/batch of questions (up to count, default 5) using AI model fallbacks
+ * Generate a single set/batch of questions with resilient multi-model failover
  */
 async function generateSingleSetQuestions(topic, exam, subject, count = 5, pastedText = null, batchIndex = 0) {
   const seed = Date.now().toString(36) + `_b${batchIndex}_` + Math.random().toString(36).substring(2, 7);
@@ -2945,29 +2708,102 @@ async function generateSingleSetQuestions(topic, exam, subject, count = 5, paste
     };
   }
 
-  console.log(`[Set ${batchIndex + 1}] ⚠️ Gemini failed. Falling back to Groq...`);
+  console.log(`[Set ${batchIndex + 1}] ⚠️ Gemini unavailable. Falling back to Groq...`);
   const groqResult = await generateQuestionsWithGroq(topic, exam, subject, count, pastedText, seed);
   if (groqResult && groqResult.questions && groqResult.questions.length > 0) {
     console.log(`[Set ${batchIndex + 1}] ✅ Groq successful.`);
     return groqResult;
   }
 
-  console.log(`[Set ${batchIndex + 1}] ⚠️ Groq failed. Falling back to ChatGPT...`);
-  const chatGptResult = await generateQuestionsWithChatGPT(topic, exam, subject, count, pastedText, seed);
-  if (chatGptResult && chatGptResult.questions && chatGptResult.questions.length > 0) {
-    console.log(`[Set ${batchIndex + 1}] ✅ ChatGPT successful.`);
-    return chatGptResult;
-  }
-
-  console.log(`[Set ${batchIndex + 1}] ⚠️ ChatGPT failed. Falling back to OpenRouter...`);
+  console.log(`[Set ${batchIndex + 1}] ⚠️ Groq unavailable. Falling back to OpenRouter...`);
   const openRouterResult = await generateQuestionsWithOpenRouter(topic, exam, subject, count, pastedText, seed);
   if (openRouterResult && openRouterResult.questions && openRouterResult.questions.length > 0) {
     console.log(`[Set ${batchIndex + 1}] ✅ OpenRouter successful.`);
     return openRouterResult;
   }
 
+  console.log(`[Set ${batchIndex + 1}] ⚠️ OpenRouter unavailable. Falling back to ChatGPT...`);
+  const chatGptResult = await generateQuestionsWithChatGPT(topic, exam, subject, count, pastedText, seed);
+  if (chatGptResult && chatGptResult.questions && chatGptResult.questions.length > 0) {
+    console.log(`[Set ${batchIndex + 1}] ✅ ChatGPT successful.`);
+    return chatGptResult;
+  }
+
   console.log(`[Set ${batchIndex + 1}] ❌ All AI models failed for this set.`);
   return null;
+}
+
+/**
+ * Set-by-set batch generation to prevent AI timeouts/truncation when users request large question counts.
+ * Breaks total requested count into 5-question sets and combines them seamlessly.
+ */
+async function generateQuestions(topic, exam, subject, count = 10, pastedText = null, onProgress = null, chatId = null) {
+  const BATCH_SIZE = 5;
+  const totalBatches = Math.ceil(count / BATCH_SIZE);
+
+  let allQuestions = [];
+  let combinedTokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+  let modelsUsedSet = new Set();
+  let remaining = count;
+
+  console.log(`🚀 Starting set-by-set generation for total ${count} question(s) in ${totalBatches} set(s)...`);
+
+  for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+    if (chatId && topicInput.get(chatId)?.cancelled) {
+      console.log(`🛑 Generation cancelled by user ${chatId} before set ${batchIndex + 1}`);
+      return null;
+    }
+
+    const currentBatchCount = Math.min(BATCH_SIZE, remaining);
+
+    if (onProgress) {
+      onProgress(allQuestions.length, count, batchIndex + 1, totalBatches);
+    }
+
+    const batchResult = await generateSingleSetQuestions(topic, exam, subject, currentBatchCount, pastedText, batchIndex);
+
+    if (chatId && topicInput.get(chatId)?.cancelled) {
+      console.log(`🛑 Generation cancelled by user ${chatId} during set ${batchIndex + 1}`);
+      return null;
+    }
+
+    if (batchResult && batchResult.questions && batchResult.questions.length > 0) {
+      allQuestions.push(...batchResult.questions);
+      remaining -= batchResult.questions.length;
+
+      if (batchResult.modelUsed) {
+        modelsUsedSet.add(batchResult.modelUsed);
+      }
+      if (batchResult.tokenUsage) {
+        combinedTokenUsage.promptTokens += (batchResult.tokenUsage.promptTokens || 0);
+        combinedTokenUsage.completionTokens += (batchResult.tokenUsage.completionTokens || 0);
+        combinedTokenUsage.totalTokens += (batchResult.tokenUsage.totalTokens || 0);
+      }
+
+      if (onProgress) {
+        onProgress(allQuestions.length, count, batchIndex + 1, totalBatches);
+      }
+    } else {
+      console.warn(`⚠️ Set ${batchIndex + 1}/${totalBatches} returned no questions.`);
+      if (allQuestions.length === 0) {
+        return null;
+      }
+      break;
+    }
+  }
+
+  if (allQuestions.length === 0) {
+    console.log('❌ All AI models failed across all sets.');
+    return null;
+  }
+
+  const modelUsed = Array.from(modelsUsedSet).join(', ') || 'AI Assistant';
+
+  return {
+    questions: allQuestions.slice(0, count),
+    modelUsed,
+    tokenUsage: combinedTokenUsage
+  };
 }
 
 /**
@@ -3175,7 +3011,16 @@ async function generateQuestionsWithAnimation(chatId, topic, exam, subject, coun
   }
 
   // Failure fallback
-  await bot.sendMessage(chatId, '❌ API fail or limit reached.', { reply_markup: getSettingsKeyboard() });
+  await bot.sendMessage(
+    chatId,
+    `⚠️ <b>Question Generation Could Not Complete</b>\n━━━━━━━━━━━━━━━━━━━━\n` +
+    `The AI engines encountered rate limits or connection issues during question generation.\n\n` +
+    `🔍 <b>What you can do:</b>\n` +
+    `• Wait 30–60 seconds for API rate limits to reset and retry\n` +
+    `• Check <b>Settings ⚙️</b> to inspect or refresh your API keys\n` +
+    `• Try generating with a smaller count (e.g., 5 questions)`,
+    { parse_mode: 'HTML', reply_markup: getSettingsKeyboard() }
+  );
   return null;
 }
 
@@ -3467,48 +3312,61 @@ Structure:
 3. ⚡ Pro-Tip / Mnemonic / Shortcut formula (if applicable)
 Keep response concise, engaging, and under 300 words.`;
 
-    const model = LAST_WORKING_GEMINI_MODEL || 'gemini-1.5-flash';
+    const geminiModels = ['gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-flash-lite-latest', 'gemini-3.6-flash'];
+    const modelToTry = LAST_WORKING_GEMINI_MODEL ? [LAST_WORKING_GEMINI_MODEL, ...geminiModels.filter(m => m !== LAST_WORKING_GEMINI_MODEL)] : geminiModels;
     let replyText = '';
 
-    try {
-      const res = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
-        { contents: [{ parts: [{ text: prompt }] }] },
-        { timeout: 30000 }
-      );
-      replyText = res.data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      } catch (e) {
-        const groqKey = process.env.GROQ_API_KEY;
-        const openrouterKey = process.env.OPENROUTER_API_KEY || OPENROUTER_API_KEY;
-        if (groqKey) {
-          try {
-            const groqRes = await axios.post(
-              'https://api.groq.com/openai/v1/chat/completions',
-              { model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: prompt }] },
-              { headers: { 'Authorization': `Bearer ${groqKey}`, 'Content-Type': 'application/json' }, timeout: 20000 }
-            );
-            replyText = groqRes.data.choices[0].message.content;
-          } catch (gErr) {
-            if (openrouterKey) {
-              const orRes = await axios.post(
-                'https://openrouter.ai/api/v1/chat/completions',
-                { model: 'openai/gpt-oss-20b:free', messages: [{ role: 'user', content: prompt }] },
-                { headers: { 'Authorization': `Bearer ${openrouterKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': 'https://examvault.app', 'X-Title': 'ExamVault Bot' }, timeout: 20000 }
-              );
-              replyText = orRes.data.choices[0].message.content;
-            } else { throw gErr; }
-          }
-        } else if (openrouterKey) {
-          const orRes = await axios.post(
-            'https://openrouter.ai/api/v1/chat/completions',
-            { model: 'openai/gpt-oss-20b:free', messages: [{ role: 'user', content: prompt }] },
-            { headers: { 'Authorization': `Bearer ${openrouterKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': 'https://examvault.app', 'X-Title': 'ExamVault Bot' }, timeout: 20000 }
+    if (GEMINI_API_KEY) {
+      for (const model of modelToTry) {
+        try {
+          const res = await axios.post(
+            `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
+            { contents: [{ parts: [{ text: prompt }] }] },
+            { timeout: 30000 }
           );
-          replyText = orRes.data.choices[0].message.content;
-        } else {
-          throw e;
+          if (res.data.candidates?.[0]?.content?.parts?.[0]?.text) {
+            replyText = res.data.candidates[0].content.parts[0].text;
+            LAST_WORKING_GEMINI_MODEL = model;
+            break;
+          }
+        } catch (gErr) {
+          console.warn(`[Tutor] Gemini ${model} failed:`, gErr.response?.data?.error?.message || gErr.message);
         }
       }
+    }
+
+    if (!replyText) {
+      const groqKey = process.env.GROQ_API_KEY;
+      const openrouterKey = process.env.OPENROUTER_API_KEY || OPENROUTER_API_KEY;
+      if (groqKey) {
+        try {
+          const groqRes = await axios.post(
+            'https://api.groq.com/openai/v1/chat/completions',
+            { model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: prompt }] },
+            { headers: { 'Authorization': `Bearer ${groqKey}`, 'Content-Type': 'application/json' }, timeout: 20000 }
+          );
+          replyText = groqRes.data.choices[0].message.content;
+        } catch (gErr) {
+          if (openrouterKey) {
+            const orRes = await axios.post(
+              'https://openrouter.ai/api/v1/chat/completions',
+              { model: 'openai/gpt-oss-20b:free', messages: [{ role: 'user', content: prompt }] },
+              { headers: { 'Authorization': `Bearer ${openrouterKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': 'https://examvault.app', 'X-Title': 'ExamVault Bot' }, timeout: 20000 }
+            );
+            replyText = orRes.data.choices[0].message.content;
+          } else { throw gErr; }
+        }
+      } else if (openrouterKey) {
+        const orRes = await axios.post(
+          'https://openrouter.ai/api/v1/chat/completions',
+          { model: 'openai/gpt-oss-20b:free', messages: [{ role: 'user', content: prompt }] },
+          { headers: { 'Authorization': `Bearer ${openrouterKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': 'https://examvault.app', 'X-Title': 'ExamVault Bot' }, timeout: 20000 }
+        );
+        replyText = orRes.data.choices[0].message.content;
+      } else {
+        throw new Error('All AI models unavailable. Please check API keys.');
+      }
+    }
 
     let cleaned = escapeHTML(replyText)
       .replace(/&lt;b&gt;(.*?)&lt;\/b&gt;/g, '<b>$1</b>')
@@ -3649,16 +3507,23 @@ Output JSON ONLY with format:
     let rawResponse = null;
 
     if (GEMINI_API_KEY) {
-      try {
-        const model = LAST_WORKING_GEMINI_MODEL || 'gemini-1.5-flash';
-        const res = await axios.post(
-          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
-          { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: 'application/json' } },
-          { timeout: 30000 }
-        );
-        rawResponse = res.data.candidates?.[0]?.content?.parts?.[0]?.text;
-      } catch (gErr) {
-        console.warn('[Flashcards] Gemini failed:', gErr.message);
+      const geminiModels = ['gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-flash-lite-latest', 'gemini-3.6-flash'];
+      const modelsToTry = LAST_WORKING_GEMINI_MODEL ? [LAST_WORKING_GEMINI_MODEL, ...geminiModels.filter(m => m !== LAST_WORKING_GEMINI_MODEL)] : geminiModels;
+      for (const model of modelsToTry) {
+        try {
+          const res = await axios.post(
+            `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
+            { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: 'application/json' } },
+            { timeout: 30000 }
+          );
+          if (res.data.candidates?.[0]?.content?.parts?.[0]?.text) {
+            rawResponse = res.data.candidates[0].content.parts[0].text;
+            LAST_WORKING_GEMINI_MODEL = model;
+            break;
+          }
+        } catch (gErr) {
+          console.warn(`[Flashcards] Gemini ${model} failed:`, gErr.response?.data?.error?.message || gErr.message);
+        }
       }
     }
 
@@ -4736,8 +4601,8 @@ bot.on('message', async (msg) => {
     bot.sendMessage(chatId, '🔍 <b>Testing Gemini API Key...</b>', { parse_mode: 'HTML' });
 
     try {
-      // Use the same fallback logic for verification
-      const models = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-1.0-pro'];
+      // Use the active Gemini models for verification
+      const models = ['gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-flash-lite-latest', 'gemini-3.6-flash'];
       let workingModel = null;
       let lastError = null;
       let quotaExceededError = false;
@@ -5245,14 +5110,26 @@ Include:
 3. Give them a "Pro-Tip" or Mnemonic memory trick to solve such questions in under 30 seconds.
 Keep it strictly under 250 words, encouraging and clear!`;
 
-        const targetModel = LAST_WORKING_GEMINI_MODEL || 'gemini-1.5-flash'; // fallback if no tests done yet
-        const gRes = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${GEMINI_API_KEY}`, {
+        const geminiModels = ['gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-flash-lite-latest', 'gemini-3.6-flash'];
+        const modelsToTry = LAST_WORKING_GEMINI_MODEL ? [LAST_WORKING_GEMINI_MODEL, ...geminiModels.filter(m => m !== LAST_WORKING_GEMINI_MODEL)] : geminiModels;
+        let rawText = '';
 
+        for (const targetModel of modelsToTry) {
+          try {
+            const gRes = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${GEMINI_API_KEY}`, {
+              contents: [{ parts: [{ text: prompt }] }]
+            });
+            if (gRes.data.candidates?.[0]?.content?.parts?.[0]?.text) {
+              rawText = gRes.data.candidates[0].content.parts[0].text;
+              LAST_WORKING_GEMINI_MODEL = targetModel;
+              break;
+            }
+          } catch (mErr) {
+            console.warn(`[DeepDive] Gemini ${targetModel} failed:`, mErr.response?.data?.error?.message || mErr.message);
+          }
+        }
 
-          contents: [{ parts: [{ text: prompt }] }]
-        });
-
-        const rawText = gRes.data.candidates[0].content.parts[0].text;
+        if (!rawText) throw new Error('AI could not generate explanation at this time.');
         
         // Escape HTML first then carefully re-enable b and i tags
         let htmlText = escapeHTML(rawText)
@@ -6580,6 +6457,8 @@ http.createServer(async (req, res) => {
   res.end(html);
 }).listen(PORT, '0.0.0.0', () => {
   console.log(`🌐 Health & Web Dashboard server listening on port ${PORT}`);
+}).on('error', (err) => {
+  console.log(`🌐 HTTP dashboard server info: ${err.message}`);
 });
 
 // Graceful shutdown to prevent "409 Conflict" on Telegram for Render (Zero-Downtime Deploy)
