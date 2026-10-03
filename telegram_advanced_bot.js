@@ -163,7 +163,7 @@ async function getLiveTokenStatus(forceRefresh = false) {
     status.gemini = { ok: false, details: '❌ Key Missing' };
   } else {
     try {
-      const geminiModels = ['gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-flash-lite-latest', 'gemini-3.6-flash'];
+      const geminiModels = ['gemini-3.5-flash-lite', 'gemini-3.6-flash', 'gemini-3.1-flash-lite', 'gemini-flash-lite-latest'];
       const modelToTest = LAST_WORKING_GEMINI_MODEL || geminiModels[0];
       let workingModel = null;
       let lastErr = null;
@@ -1764,13 +1764,9 @@ async function generatePyqYearQuestions(examCatalogKey, year, section, subject, 
     // Gemini primary
     const allGeminiModels = [
       'gemini-3.5-flash-lite',
-      'gemini-3.1-flash-lite',
-      'gemini-flash-lite-latest',
-      'gemini-3.5-flash',
       'gemini-3.6-flash',
-      'gemini-flash-latest',
-      'gemma-4-31b-it',
-      'gemma-4-26b-a4b-it'
+      'gemini-3.1-flash-lite',
+      'gemini-flash-lite-latest'
     ];
     const modelsToTry = LAST_WORKING_GEMINI_MODEL
       ? [LAST_WORKING_GEMINI_MODEL, ...allGeminiModels.filter(m => m !== LAST_WORKING_GEMINI_MODEL)]
@@ -2341,13 +2337,9 @@ async function generateMockSectionQuestions(exam, section, subject, count, patte
     if (geminiKey) {
       const allGeminiModels = [
         'gemini-3.5-flash-lite',
-        'gemini-3.1-flash-lite',
-        'gemini-flash-lite-latest',
-        'gemini-3.5-flash',
         'gemini-3.6-flash',
-        'gemini-flash-latest',
-        'gemma-4-31b-it',
-        'gemma-4-26b-a4b-it'
+        'gemini-3.1-flash-lite',
+        'gemini-flash-lite-latest'
       ];
       const modelsToTry = LAST_WORKING_GEMINI_MODEL
         ? [LAST_WORKING_GEMINI_MODEL, ...allGeminiModels.filter(m => m !== LAST_WORKING_GEMINI_MODEL)]
@@ -2568,13 +2560,9 @@ async function generateQuestionsWithGemini(topic, exam, subject, count = 10, pas
   // Active fast models
   const allModels = [
     'gemini-3.5-flash-lite',
-    'gemini-3.1-flash-lite',
-    'gemini-flash-lite-latest',
-    'gemini-3.5-flash',
     'gemini-3.6-flash',
-    'gemini-flash-latest',
-    'gemma-4-31b-it',
-    'gemma-4-26b-a4b-it'
+    'gemini-3.1-flash-lite',
+    'gemini-flash-lite-latest'
   ];
 
   const modelsToTry = LAST_WORKING_GEMINI_MODEL 
