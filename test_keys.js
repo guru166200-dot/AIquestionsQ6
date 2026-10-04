@@ -37,11 +37,11 @@ async function testGemini() {
   console.log('\nTesting Gemini Key:', key.substring(0, 10) + '...');
   
   const models = [
+    'gemini-2.5-flash',
     'gemini-3.5-flash',
     'gemini-3.5-flash-lite',
-    'gemini-3.1-flash-lite',
-    'gemini-flash-lite-latest',
-    'gemini-3.6-flash'
+    'gemini-3.6-flash',
+    'gemini-flash-latest'
   ];
   for (const model of models) {
     try {

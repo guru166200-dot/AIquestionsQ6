@@ -163,7 +163,7 @@ async function getLiveTokenStatus(forceRefresh = false) {
     status.gemini = { ok: false, details: '❌ Key Missing' };
   } else {
     try {
-      const geminiModels = ['gemini-3.5-flash-lite', 'gemini-3.6-flash', 'gemini-3.1-flash-lite', 'gemini-flash-lite-latest'];
+      const geminiModels = ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-flash', 'gemini-1.5-pro'];
       const modelToTest = LAST_WORKING_GEMINI_MODEL || geminiModels[0];
       let workingModel = null;
       let lastErr = null;
@@ -255,15 +255,15 @@ async function getLiveTokenStatus(forceRefresh = false) {
     try {
       const res = await axios.post(
         'https://openrouter.ai/api/v1/chat/completions',
-        { model: 'openai/gpt-oss-20b:free', messages: [{ role: 'user', content: 'hi' }], max_tokens: 2 },
-        { 
-          headers: { 
-            'Authorization': `Bearer ${openrouterKey}`, 
+        { model: 'meta-llama/llama-3.3-70b-instruct:free', messages: [{ role: 'user', content: 'hi' }], max_tokens: 2 },
+        {
+          headers: {
+            'Authorization': `Bearer ${openrouterKey}`,
             'Content-Type': 'application/json',
             'HTTP-Referer': 'https://examvault.app',
             'X-Title': 'ExamVault Bot'
-          }, 
-          timeout: 5000 
+          },
+          timeout: 5000
         }
       );
       if (res.data.choices) {
@@ -298,9 +298,9 @@ let globalTokenStats = {
   lastTestTokens: { promptTokens: 0, completionTokens: 0, totalTokens: 0, model: 'None' },
   // Per-model cumulative stats
   byModel: {
-    gemini:     { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0 },
-    groq:       { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0 },
-    openai:     { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+    gemini: { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+    groq: { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+    openai: { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0 },
     openrouter: { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0 }
   }
 };
@@ -323,9 +323,9 @@ function loadTokenStats() {
         ...globalTokenStats,
         ...loaded,
         byModel: {
-          gemini:     { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0, ...(loaded.byModel?.gemini     || {}) },
-          groq:       { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0, ...(loaded.byModel?.groq       || {}) },
-          openai:     { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0, ...(loaded.byModel?.openai     || {}) },
+          gemini: { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0, ...(loaded.byModel?.gemini || {}) },
+          groq: { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0, ...(loaded.byModel?.groq || {}) },
+          openai: { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0, ...(loaded.byModel?.openai || {}) },
           openrouter: { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0, ...(loaded.byModel?.openrouter || {}) }
         }
       };
@@ -350,22 +350,22 @@ function recordTokenUsage(model, usage) {
   // Accumulate per-model
   const mLow = model.toLowerCase();
   let bucket;
-  if (mLow.includes('gemini'))           bucket = 'gemini';
-  else if (mLow.includes('groq'))        bucket = 'groq';
-  else if (mLow.includes('openrouter'))  bucket = 'openrouter';
+  if (mLow.includes('gemini')) bucket = 'gemini';
+  else if (mLow.includes('groq')) bucket = 'groq';
+  else if (mLow.includes('openrouter')) bucket = 'openrouter';
   else if (mLow.includes('chatgpt') || mLow.includes('openai') || mLow.includes('gpt')) bucket = 'openai';
   if (bucket) {
-    globalTokenStats.byModel[bucket].requests         += 1;
-    globalTokenStats.byModel[bucket].promptTokens     += p;
+    globalTokenStats.byModel[bucket].requests += 1;
+    globalTokenStats.byModel[bucket].promptTokens += p;
     globalTokenStats.byModel[bucket].completionTokens += c;
-    globalTokenStats.byModel[bucket].totalTokens      += t;
+    globalTokenStats.byModel[bucket].totalTokens += t;
   }
 
   saveTokenStats();
 }
 
 function formatLiveTokenCountMessage() {
-  const g  = globalTokenStats;
+  const g = globalTokenStats;
   const bm = g.byModel;
   const last = g.lastTestTokens;
 
@@ -380,10 +380,10 @@ function formatLiveTokenCountMessage() {
 
   const lastLine = last && last.totalTokens > 0
     ? `📌 <b>Last Generation</b>\n` +
-      `   • Model: <code>${escapeHTML(last.model)}</code>\n` +
-      `   • Prompt:     <code>${last.promptTokens.toLocaleString()} tokens</code>\n` +
-      `   • Completion: <code>${last.completionTokens.toLocaleString()} tokens</code>\n` +
-      `   • <b>Total: <code>${last.totalTokens.toLocaleString()} tokens</code></b>\n`
+    `   • Model: <code>${escapeHTML(last.model)}</code>\n` +
+    `   • Prompt:     <code>${last.promptTokens.toLocaleString()} tokens</code>\n` +
+    `   • Completion: <code>${last.completionTokens.toLocaleString()} tokens</code>\n` +
+    `   • <b>Total: <code>${last.totalTokens.toLocaleString()} tokens</code></b>\n`
     : `📌 <b>Last Generation:</b> <i>None yet</i>\n`;
 
   const now = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
@@ -419,7 +419,7 @@ function formatLiveTokenCountMessage() {
 
 function formatPinnedTokenDashboardText(status) {
   const lastt = globalTokenStats.lastTestTokens;
-  const lastFormatted = lastt && lastt.totalTokens > 0 
+  const lastFormatted = lastt && lastt.totalTokens > 0
     ? `${lastt.totalTokens.toLocaleString()} tokens (${lastt.model})`
     : 'None yet';
 
@@ -910,7 +910,7 @@ async function saveAllQuestionsToNotion(exam, subject, topic, questions, chatId)
   } catch (error) {
     console.error('Notion Hierarchy Error:', error.message);
     if (statusMsg) {
-      bot.editMessageText(`⚠️ Notion save status: ${error.message}\n\nQuestions were generated successfully!`, { chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'HTML' }).catch(() => {});
+      bot.editMessageText(`⚠️ Notion save status: ${error.message}\n\nQuestions were generated successfully!`, { chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'HTML' }).catch(() => { });
     }
     return null;
   }
@@ -1125,8 +1125,8 @@ function sanitizeAndValidateQuestions(questions) {
     if (exp) {
       // Layer 3: Statement Type Semantic Reconciliation ("1, 2 and 3" vs "1 and 2 only", etc.)
       const isAllCorrect = /all\s+(?:three|3|four|4)?\s*(?:statements?|of\s+the\s+above|are\s+correct|are\s+true|are\s+accurate)/i.test(exp) ||
-                           /(?:statements?\s*)?(?:1,\s*2\s*(?:and|&)\s*3|1,\s*2,\s*3)\s*(?:are\s+correct|are\s+true|are\s+accurate|all\s+follow)/i.test(exp) ||
-                           /every\s+statement\s+is\s+(?:correct|true|accurate)/i.test(exp);
+        /(?:statements?\s*)?(?:1,\s*2\s*(?:and|&)\s*3|1,\s*2,\s*3)\s*(?:are\s+correct|are\s+true|are\s+accurate|all\s+follow)/i.test(exp) ||
+        /every\s+statement\s+is\s+(?:correct|true|accurate)/i.test(exp);
 
       const is1and2Only = /(?:only\s+statements?\s*1\s*(?:and|&)\s*2|1\s*(?:and|&)\s*2\s*only|statements?\s*1\s*(?:and|&)\s*2\s*are\s*correct|statement\s*3\s*is\s*(?:in)?correct)/i.test(exp) && !isAllCorrect;
       const is2and3Only = /(?:only\s+statements?\s*2\s*(?:and|&)\s*3|2\s*(?:and|&)\s*3\s*only|statements?\s*2\s*(?:and|&)\s*3\s*are\s*correct|statement\s*1\s*is\s*(?:in)?correct)/i.test(exp) && !isAllCorrect;
@@ -1176,9 +1176,9 @@ function sanitizeAndValidateQuestions(questions) {
 
       // Layer 4: Explicit Option Letter in Explanation
       const explicitLetterMatch = exp.match(/✅\s*Correct\s*:?\s*(?:Option\s+)?\(?([A-D])\)?(?:\s*[:.\-)]|$)/i) ||
-                                  exp.match(/Correct\s+Option\s*(?:is|:)?\s*\(?([A-D])\)?/i) ||
-                                  exp.match(/Correct\s+Answer\s*(?:is|:)?\s*\(?([A-D])\)?/i) ||
-                                  exp.match(/\b(?:Hence|Therefore|Thus|So)\s*,?\s*(?:Option\s+)?\(?([A-D])\)?\s*is\s+correct/i);
+        exp.match(/Correct\s+Option\s*(?:is|:)?\s*\(?([A-D])\)?/i) ||
+        exp.match(/Correct\s+Answer\s*(?:is|:)?\s*\(?([A-D])\)?/i) ||
+        exp.match(/\b(?:Hence|Therefore|Thus|So)\s*,?\s*(?:Option\s+)?\(?([A-D])\)?\s*is\s+correct/i);
 
       if (explicitLetterMatch && explicitLetterMatch[1]) {
         const found = explicitLetterMatch[1].toUpperCase();
@@ -1238,7 +1238,7 @@ function sanitizeAndValidateQuestions(questions) {
 
       // Layer 7: Quantitative & Mathematical Chain-of-Thought Solver Verification
       const explicitOptValMatch = exp.match(/Option\s+([A-D])\s*\(?([^)\n,;.]+)\)?/i) ||
-                                  exp.match(/✅\s*Correct\s*:?\s*(?:Option\s+)?([A-D])\s*\(?([^)\n,;.]+)\)?/i);
+        exp.match(/✅\s*Correct\s*:?\s*(?:Option\s+)?([A-D])\s*\(?([^)\n,;.]+)\)?/i);
 
       if (explicitOptValMatch && explicitOptValMatch[1] && explicitOptValMatch[2]) {
         const targetLetter = explicitOptValMatch[1].toUpperCase();
@@ -1317,7 +1317,7 @@ function sanitizeAndValidateQuestions(questions) {
       const isNegationQuestion = /\b(?:NOT|INCORRECT|FALSE|EXCEPT|NEVER|CANNOT)\b/i.test(qStem);
       if (isNegationQuestion) {
         const incorrectMatch = exp.match(/(?:Option\s+)?([A-D])\s+(?:is\s+)?(?:incorrect|false|not\s+correct|not\s+true)/i) ||
-                               exp.match(/(?:Statement|Point)\s+([1-4A-D])\s+is\s+(?:incorrect|false)/i);
+          exp.match(/(?:Statement|Point)\s+([1-4A-D])\s+is\s+(?:incorrect|false)/i);
         if (incorrectMatch && incorrectMatch[1]) {
           let falseOption = incorrectMatch[1].toUpperCase();
           if (falseOption === '1') falseOption = 'A';
@@ -1372,14 +1372,14 @@ function safeParseJSON(rawText) {
   // Try direct parse first
   try {
     parsedObj = JSON.parse(text);
-  } catch (e) {}
+  } catch (e) { }
 
   // Strip markdown code fences if present
   if (!parsedObj && text.includes('```')) {
     text = text.replace(/```json/gi, '').replace(/```/g, '').trim();
     try {
       parsedObj = JSON.parse(text);
-    } catch (e) {}
+    } catch (e) { }
   }
 
   // Extract outer braces {}
@@ -1390,7 +1390,7 @@ function safeParseJSON(rawText) {
       const extracted = text.substring(firstBrace, lastBrace + 1);
       try {
         parsedObj = JSON.parse(extracted);
-      } catch (e) {}
+      } catch (e) { }
     }
   }
 
@@ -1741,8 +1741,8 @@ MANDATORY:
  * Simulates the exact difficulty, topics, and pattern of a specific exam year
  */
 async function generatePyqYearQuestions(examCatalogKey, year, section, subject, count, batchIndex = 0, onProgress = null) {
-  const catalog = (typeof examCatalogKey === 'object' && examCatalogKey !== null) 
-    ? examCatalogKey 
+  const catalog = (typeof examCatalogKey === 'object' && examCatalogKey !== null)
+    ? examCatalogKey
     : (PYQ_EXAM_CATALOG[examCatalogKey] || PYQ_EXAM_CATALOG['SSC_CGL']);
   if (!catalog) return null;
   if (!catalog.marking) catalog.marking = { positive: 2, negative: 0.5 };
@@ -1763,10 +1763,10 @@ async function generatePyqYearQuestions(examCatalogKey, year, section, subject, 
 
     // Gemini primary
     const allGeminiModels = [
-      'gemini-3.5-flash-lite',
-      'gemini-3.6-flash',
-      'gemini-3.1-flash-lite',
-      'gemini-flash-lite-latest'
+      'gemini-2.0-flash',
+      'gemini-2.0-flash-lite',
+      'gemini-1.5-flash',
+      'gemini-1.5-pro'
     ];
     const modelsToTry = LAST_WORKING_GEMINI_MODEL
       ? [LAST_WORKING_GEMINI_MODEL, ...allGeminiModels.filter(m => m !== LAST_WORKING_GEMINI_MODEL)]
@@ -1842,19 +1842,19 @@ async function generatePyqYearQuestions(examCatalogKey, year, section, subject, 
     // Fallback: OpenRouter
     const openrouterKey = process.env.OPENROUTER_API_KEY || OPENROUTER_API_KEY;
     if (!batchResult && openrouterKey) {
-      for (const model of ['openai/gpt-oss-20b:free', 'google/gemma-4-31b-it:free', 'nvidia/nemotron-3-nano-30b-a3b:free', 'inclusionai/ling-3.0-flash:free']) {
+      for (const model of ['meta-llama/llama-3.3-70b-instruct:free', 'google/gemma-2-9b-it:free', 'qwen/qwen-2.5-72b-instruct:free']) {
         try {
           const resp = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
             model, response_format: { type: 'json_object' },
             messages: [{ role: 'system', content: sysPrompt }, { role: 'user', content: userPrompt }]
-          }, { 
-            headers: { 
-              'Content-Type': 'application/json', 
+          }, {
+            headers: {
+              'Content-Type': 'application/json',
               'Authorization': `Bearer ${openrouterKey}`,
               'HTTP-Referer': 'https://examvault.app',
               'X-Title': 'ExamVault Bot'
-            }, 
-            timeout: 35000 
+            },
+            timeout: 35000
           });
           const parsed = safeParseJSON(resp.data.choices[0]?.message?.content);
           if (parsed && parsed.questions && parsed.questions.length > 0) {
@@ -1935,7 +1935,7 @@ function showPyqExamMenu(chatId, messageId = null) {
   };
 
   if (messageId) {
-    bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML', reply_markup: keyboard }).catch(() => {});
+    bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML', reply_markup: keyboard }).catch(() => { });
   } else {
     bot.sendMessage(chatId, text, { parse_mode: 'HTML', reply_markup: keyboard });
   }
@@ -1977,7 +1977,7 @@ function showPyqYearMenu(chatId, examKey, messageId = null) {
   keyboard.push([{ text: '🔙 Back to Exam List', callback_data: 'show_pyq_menu' }]);
 
   if (messageId) {
-    bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML', reply_markup: { inline_keyboard: keyboard } }).catch(() => {});
+    bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML', reply_markup: { inline_keyboard: keyboard } }).catch(() => { });
   } else {
     bot.sendMessage(chatId, text, { parse_mode: 'HTML', reply_markup: { inline_keyboard: keyboard } });
   }
@@ -2024,7 +2024,7 @@ async function startPyqSession(chatId, examKey, year) {
           `📊 <b>Overall Progress:</b> <code>${currentOverall}/${totalQs} Qs loaded (${pct}%)</code>\n` +
           `<i>Matching ${year} exam style & current affairs...</i>`,
           { chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'HTML' }
-        ).catch(() => {});
+        ).catch(() => { });
       };
 
       updatePyqProgress(0, sec.questions, 1, Math.ceil(sec.questions / 5));
@@ -2042,7 +2042,7 @@ async function startPyqSession(chatId, examKey, year) {
         bot.editMessageText(
           `❌ <b>Generation Failed!</b>\n\nCould not reconstruct questions for:\n<b>${escapeHTML(sec.name)}</b>\n\nPlease try again in a few moments.`,
           { chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'HTML' }
-        ).catch(() => {});
+        ).catch(() => { });
         return;
       }
 
@@ -2110,7 +2110,7 @@ async function startPyqSession(chatId, examKey, year) {
       `<i>Get ready! Your ${year} paper simulation begins now...</i>\n\n` +
       `<b>📝 Starting Question 1...</b>`,
       { chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'HTML' }
-    ).catch(() => {});
+    ).catch(() => { });
 
     setTimeout(() => renderMockQuestion(chatId, null), 1500);
   } catch (err) {
@@ -2129,11 +2129,11 @@ function getMockExamSystemPrompt(exam, section, subject, count, patternInfo, bat
   const seed = Date.now().toString(36) + `_mock_b${batchIndex}_` + Math.random().toString(36).substring(2, 7);
 
   const examFullNames = {
-    'SSC':  'Staff Selection Commission (SSC CGL, CHSL, MTS, GD)',
-    'RRB':  'Railway Recruitment Board (RRB NTPC, Group D, ALP)',
-    'TNPSC':'Tamil Nadu Public Service Commission (TNPSC Group 1, 2, 4)',
+    'SSC': 'Staff Selection Commission (SSC CGL, CHSL, MTS, GD)',
+    'RRB': 'Railway Recruitment Board (RRB NTPC, Group D, ALP)',
+    'TNPSC': 'Tamil Nadu Public Service Commission (TNPSC Group 1, 2, 4)',
     'Bank': 'IBPS PO, IBPS Clerk, SBI PO, SBI Clerk',
-    'JE':   'RRB JE / SSC JE / GATE ME / UPSC ESE (Junior Engineer)'
+    'JE': 'RRB JE / SSC JE / GATE ME / UPSC ESE (Junior Engineer)'
   };
 
   const markingNote = patternInfo.negative > 0
@@ -2336,10 +2336,10 @@ async function generateMockSectionQuestions(exam, section, subject, count, patte
     const geminiKey = process.env.GEMINI_API_KEY || GEMINI_API_KEY;
     if (geminiKey) {
       const allGeminiModels = [
-        'gemini-3.5-flash-lite',
-        'gemini-3.6-flash',
-        'gemini-3.1-flash-lite',
-        'gemini-flash-lite-latest'
+        'gemini-2.0-flash',
+        'gemini-2.0-flash-lite',
+        'gemini-1.5-flash',
+        'gemini-1.5-pro'
       ];
       const modelsToTry = LAST_WORKING_GEMINI_MODEL
         ? [LAST_WORKING_GEMINI_MODEL, ...allGeminiModels.filter(m => m !== LAST_WORKING_GEMINI_MODEL)]
@@ -2398,7 +2398,7 @@ async function generateMockSectionQuestions(exam, section, subject, count, patte
               recordTokenUsage(`Groq (${model})`, { promptTokens: usage.prompt_tokens || 0, completionTokens: usage.completion_tokens || 0, totalTokens: usage.total_tokens || 0 });
               break;
             }
-          } catch (e2) {}
+          } catch (e2) { }
         }
       }
     }
@@ -2406,19 +2406,19 @@ async function generateMockSectionQuestions(exam, section, subject, count, patte
     // Fallback: OpenRouter
     const openrouterKey = process.env.OPENROUTER_API_KEY || OPENROUTER_API_KEY;
     if (!batchResult && openrouterKey) {
-      for (const model of ['openai/gpt-oss-20b:free', 'google/gemma-4-31b-it:free', 'nvidia/nemotron-3-nano-30b-a3b:free', 'inclusionai/ling-3.0-flash:free']) {
+      for (const model of ['meta-llama/llama-3.3-70b-instruct:free', 'google/gemma-2-9b-it:free', 'qwen/qwen-2.5-72b-instruct:free']) {
         try {
           const resp = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
             model, response_format: { type: 'json_object' },
             messages: [{ role: 'system', content: sysPrompt }, { role: 'user', content: userPrompt }]
-          }, { 
-            headers: { 
-              'Content-Type': 'application/json', 
+          }, {
+            headers: {
+              'Content-Type': 'application/json',
               'Authorization': `Bearer ${openrouterKey}`,
               'HTTP-Referer': 'https://examvault.app',
               'X-Title': 'ExamVault Bot'
-            }, 
-            timeout: 35000 
+            },
+            timeout: 35000
           });
           const parsed = safeParseJSON(resp.data.choices[0]?.message?.content);
           if (parsed && parsed.questions && parsed.questions.length > 0) {
@@ -2427,7 +2427,7 @@ async function generateMockSectionQuestions(exam, section, subject, count, patte
             recordTokenUsage(`OpenRouter (${model})`, { promptTokens: usage.prompt_tokens || 0, completionTokens: usage.completion_tokens || 0, totalTokens: usage.total_tokens || 0 });
             break;
           }
-        } catch (e4) {}
+        } catch (e4) { }
       }
     }
 
@@ -2449,7 +2449,7 @@ async function generateMockSectionQuestions(exam, section, subject, count, patte
             recordTokenUsage(`ChatGPT (${model})`, { promptTokens: usage.prompt_tokens || 0, completionTokens: usage.completion_tokens || 0, totalTokens: usage.total_tokens || 0 });
             break;
           }
-        } catch (e3) {}
+        } catch (e3) { }
       }
     }
 
@@ -2476,7 +2476,7 @@ async function generateMockSectionQuestions(exam, section, subject, count, patte
     questions: allQuestions.slice(0, count),
     modelUsed: Array.from(modelUsedSet).join(', ') || 'AI Mock Engine'
   };
-}function getSystemPrompt(exam, subject, topic, count, pastedText = null, seed = "") {
+} function getSystemPrompt(exam, subject, topic, count, pastedText = null, seed = "") {
   const isCurrentAffairs = (subject || '').toLowerCase().includes('current affairs');
   const yearRange = isCurrentAffairs ? '2024 to 2026' : '2000 to 2026';
   const isBankSetBased = isBankSetBasedHelper(exam, topic);
@@ -2556,16 +2556,16 @@ async function generateQuestionsWithGemini(topic, exam, subject, count = 10, pas
   const geminiKey = process.env.GEMINI_API_KEY || GEMINI_API_KEY;
   if (!geminiKey) return null;
   const seed = customSeed || (Date.now().toString(36) + Math.random().toString(36).substring(2, 7));
-  
+
   // Active fast models
   const allModels = [
-    'gemini-3.5-flash-lite',
-    'gemini-3.6-flash',
-    'gemini-3.1-flash-lite',
-    'gemini-flash-lite-latest'
+    'gemini-2.0-flash',
+    'gemini-2.0-flash-lite',
+    'gemini-1.5-flash',
+    'gemini-1.5-pro'
   ];
 
-  const modelsToTry = LAST_WORKING_GEMINI_MODEL 
+  const modelsToTry = LAST_WORKING_GEMINI_MODEL
     ? [LAST_WORKING_GEMINI_MODEL, ...allModels.filter(m => m !== LAST_WORKING_GEMINI_MODEL)]
     : allModels;
 
@@ -2577,7 +2577,7 @@ async function generateQuestionsWithGemini(topic, exam, subject, count = 10, pas
         {
           systemInstruction: { parts: [{ text: getSystemPrompt(exam, subject, topic, count, pastedText, seed) }] },
           contents: [{ role: 'user', parts: [{ text: getUserPrompt(exam, subject, topic, count, pastedText, seed) }] }],
-          generationConfig: { 
+          generationConfig: {
             responseMimeType: 'application/json',
             temperature: 0.7,
             maxOutputTokens: 4096
@@ -2679,7 +2679,7 @@ async function generateQuestionsWithGroq(topic, exam, subject, count = 10, paste
   const groqKey = process.env.GROQ_API_KEY || GROQ_API_KEY;
   if (!groqKey) return null;
   const seed = customSeed || Date.now().toString(36);
-  const models = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'];
+  const models = ['openai/gpt-oss-20b', 'openai/gpt-oss-120b', 'qwen/qwen3.8-27b'];
   for (const model of models) {
     try {
       console.log(`Trying Groq model: ${model}...`);
@@ -2722,11 +2722,11 @@ async function generateQuestionsWithOpenRouter(topic, exam, subject, count = 10,
   if (!openrouterKey) return null;
   const seed = customSeed || (Date.now().toString(36) + Math.random().toString(36).substring(2, 7));
   const models = [
-    'openai/gpt-oss-20b:free',
-    'google/gemma-4-31b-it:free',
-    'nvidia/nemotron-3-nano-30b-a3b:free',
-    'inclusionai/ling-3.0-flash:free',
-    'poolside/laguna-xs-2.1:free'
+    'meta-llama/llama-3.3-70b-instruct:free',
+    'google/gemma-2-9b-it:free',
+    'qwen/qwen-2.5-72b-instruct:free',
+    'mistralai/mistral-7b-instruct:free',
+    'deepseek/deepseek-r1:free'
   ];
 
   for (const model of models) {
@@ -3092,7 +3092,7 @@ async function generateQuestionsWithAnimation(chatId, topic, exam, subject, coun
     });
 
     // Auto-update pinned token status message live
-    updatePinnedTokenStatus(chatId).catch(() => {});
+    updatePinnedTokenStatus(chatId).catch(() => { });
 
     return { questions, modelUsed, tokenUsage };
   }
@@ -3399,7 +3399,7 @@ Structure:
 3. ⚡ Pro-Tip / Mnemonic / Shortcut formula (if applicable)
 Keep response concise, engaging, and under 300 words.`;
 
-    const geminiModels = ['gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-flash-lite-latest', 'gemini-3.6-flash'];
+    const geminiModels = ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-flash', 'gemini-1.5-pro'];
     const modelToTry = LAST_WORKING_GEMINI_MODEL ? [LAST_WORKING_GEMINI_MODEL, ...geminiModels.filter(m => m !== LAST_WORKING_GEMINI_MODEL)] : geminiModels;
     let replyText = '';
 
@@ -3437,7 +3437,7 @@ Keep response concise, engaging, and under 300 words.`;
           if (openrouterKey) {
             const orRes = await axios.post(
               'https://openrouter.ai/api/v1/chat/completions',
-              { model: 'openai/gpt-oss-20b:free', messages: [{ role: 'user', content: prompt }] },
+              { model: 'meta-llama/llama-3.3-70b-instruct:free', messages: [{ role: 'user', content: prompt }] },
               { headers: { 'Authorization': `Bearer ${openrouterKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': 'https://examvault.app', 'X-Title': 'ExamVault Bot' }, timeout: 20000 }
             );
             replyText = orRes.data.choices[0].message.content;
@@ -3446,7 +3446,7 @@ Keep response concise, engaging, and under 300 words.`;
       } else if (openrouterKey) {
         const orRes = await axios.post(
           'https://openrouter.ai/api/v1/chat/completions',
-          { model: 'openai/gpt-oss-20b:free', messages: [{ role: 'user', content: prompt }] },
+          { model: 'meta-llama/llama-3.3-70b-instruct:free', messages: [{ role: 'user', content: prompt }] },
           { headers: { 'Authorization': `Bearer ${openrouterKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': 'https://examvault.app', 'X-Title': 'ExamVault Bot' }, timeout: 20000 }
         );
         replyText = orRes.data.choices[0].message.content;
@@ -3543,7 +3543,7 @@ function showSyllabusMap(chatId, exam, messageId = null) {
   };
 
   if (messageId) {
-    bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML', reply_markup: keyboard }).catch(() => {});
+    bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML', reply_markup: keyboard }).catch(() => { });
   } else {
     bot.sendMessage(chatId, text, { parse_mode: 'HTML', reply_markup: keyboard });
   }
@@ -3565,7 +3565,7 @@ function showFlashcardMenu(chatId, messageId = null) {
   };
 
   if (messageId) {
-    bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML', reply_markup: keyboard }).catch(() => {});
+    bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML', reply_markup: keyboard }).catch(() => { });
   } else {
     bot.sendMessage(chatId, text, { parse_mode: 'HTML', reply_markup: keyboard });
   }
@@ -3574,7 +3574,7 @@ function showFlashcardMenu(chatId, messageId = null) {
 async function generateFlashcards(chatId, exam, subject, messageId = null) {
   const statusText = `🗃️ <b>Generating AI Flashcards...</b>\n\nSubject: <b>${subject} (${exam})</b>\nCreating key formulas, definitions, and facts...`;
   if (messageId) {
-    bot.editMessageText(statusText, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML' }).catch(() => {});
+    bot.editMessageText(statusText, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML' }).catch(() => { });
   } else {
     bot.sendMessage(chatId, statusText, { parse_mode: 'HTML' });
   }
@@ -3594,7 +3594,7 @@ Output JSON ONLY with format:
     let rawResponse = null;
 
     if (GEMINI_API_KEY) {
-      const geminiModels = ['gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-flash-lite-latest', 'gemini-3.6-flash'];
+      const geminiModels = ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-flash', 'gemini-1.5-pro'];
       const modelsToTry = LAST_WORKING_GEMINI_MODEL ? [LAST_WORKING_GEMINI_MODEL, ...geminiModels.filter(m => m !== LAST_WORKING_GEMINI_MODEL)] : geminiModels;
       for (const model of modelsToTry) {
         try {
@@ -3619,7 +3619,7 @@ Output JSON ONLY with format:
       if (openrouterKey) {
         try {
           const resp = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
-            model: 'openai/gpt-oss-20b:free',
+            model: 'meta-llama/llama-3.3-70b-instruct:free',
             response_format: { type: 'json_object' },
             messages: [{ role: 'user', content: prompt }]
           }, {
@@ -3690,7 +3690,7 @@ function renderFlashcard(chatId, messageId = null) {
   keyboard.inline_keyboard.push([{ text: '🏠 Main Menu', callback_data: 'main_menu' }]);
 
   if (messageId) {
-    bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML', reply_markup: keyboard }).catch(() => {});
+    bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML', reply_markup: keyboard }).catch(() => { });
   } else {
     bot.sendMessage(chatId, text, { parse_mode: 'HTML', reply_markup: keyboard });
   }
@@ -3712,7 +3712,7 @@ function showCountdownDashboard(chatId, messageId = null) {
     };
 
     if (messageId) {
-      bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML', reply_markup: keyboard }).catch(() => {});
+      bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML', reply_markup: keyboard }).catch(() => { });
     } else {
       bot.sendMessage(chatId, text, { parse_mode: 'HTML', reply_markup: keyboard });
     }
@@ -3750,7 +3750,7 @@ function showCountdownDashboard(chatId, messageId = null) {
   };
 
   if (messageId) {
-    bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML', reply_markup: keyboard }).catch(() => {});
+    bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML', reply_markup: keyboard }).catch(() => { });
   } else {
     bot.sendMessage(chatId, text, { parse_mode: 'HTML', reply_markup: keyboard });
   }
@@ -3921,7 +3921,7 @@ function showMockExamMenu(chatId, messageId = null) {
   };
 
   if (messageId) {
-    bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML', reply_markup: keyboard }).catch(() => {});
+    bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML', reply_markup: keyboard }).catch(() => { });
   } else {
     bot.sendMessage(chatId, text, { parse_mode: 'HTML', reply_markup: keyboard });
   }
@@ -3954,7 +3954,7 @@ function showMockExamTypeSelection(chatId, patternKey, messageId = null) {
   };
 
   if (messageId) {
-    bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML', reply_markup: keyboard }).catch(() => {});
+    bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML', reply_markup: keyboard }).catch(() => { });
   } else {
     bot.sendMessage(chatId, text, { parse_mode: 'HTML', reply_markup: keyboard });
   }
@@ -4008,7 +4008,7 @@ async function startMockOrPyqSession(chatId, patternKey, count = null, title = n
           `📊 <b>Overall Progress:</b> <code>${currentOverall}/${totalQs} Qs loaded (${pct}%)</code>\n` +
           `<i>🔴 Full mock uses real-exam-level difficulty prompts...</i>`,
           { chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'HTML' }
-        ).catch(() => {});
+        ).catch(() => { });
       };
 
       updateMockProgress(0, sec.questions, 1, Math.ceil(sec.questions / 5));
@@ -4040,7 +4040,7 @@ async function startMockOrPyqSession(chatId, patternKey, count = null, title = n
         bot.editMessageText(
           `❌ <b>Generation Failed!</b>\n\nFailed to generate questions for section:\n<b>${escapeHTML(sec.name)}</b>\n\nPlease try again or switch to ⚡ Express mode.`,
           { chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'HTML' }
-        ).catch(() => {});
+        ).catch(() => { });
         bot.sendMessage(chatId, `⬅️ <b>Mock Session Cancelled.</b>`, { parse_mode: 'HTML', reply_markup: getMainKeyboard(chatId) });
         return;
       }
@@ -4090,9 +4090,9 @@ async function startMockOrPyqSession(chatId, patternKey, count = null, title = n
     // Save Full Mock / Express Mock / PYQ questions to Notion with saving animation & direct URL link
     const dateStr = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
     const mockSubject = isPyq ? `Official PYQ Papers` : (isExpress ? `Express Mock Exams` : `Full Official Mock Exams`);
-    const mockTopic = title || (isPyq 
+    const mockTopic = title || (isPyq
       ? `${pattern.name} Official PYQ Paper`
-      : (isExpress 
+      : (isExpress
         ? `${pattern.name} — Express Mock (${dateStr})`
         : `${pattern.name} — Full Official Mock Exam (${dateStr})`));
 
@@ -4105,8 +4105,8 @@ async function startMockOrPyqSession(chatId, patternKey, count = null, title = n
       });
 
     try {
-      bot.deleteMessage(chatId, statusMsg.message_id).catch(() => {});
-    } catch(e) {}
+      bot.deleteMessage(chatId, statusMsg.message_id).catch(() => { });
+    } catch (e) { }
 
     renderMockQuestion(chatId);
   } catch (err) {
@@ -4205,7 +4205,7 @@ function renderMockQuestion(chatId, messageId = null) {
   };
 
   if (messageId) {
-    bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML', reply_markup: keyboard }).catch(() => {});
+    bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML', reply_markup: keyboard }).catch(() => { });
   } else {
     bot.sendMessage(chatId, text, { parse_mode: 'HTML', reply_markup: keyboard });
   }
@@ -4316,7 +4316,7 @@ function finishMockExam(chatId, messageId) {
   }
 
   if (messageId) {
-    bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML', reply_markup: keyboard }).catch(() => {});
+    bot.editMessageText(text, { chat_id: chatId, message_id: messageId, parse_mode: 'HTML', reply_markup: keyboard }).catch(() => { });
   } else {
     bot.sendMessage(chatId, text, { parse_mode: 'HTML', reply_markup: keyboard });
   }
@@ -4333,7 +4333,7 @@ bot.onText(/\/users/, (msg) => {
 
   const userList = Array.from(allUsers);
   let response = `👥 <b>User Management System</b>\n━━━━━━━━━━━━━━━━━━━━\nTotal Users: <b>${userList.length}</b>\n\n`;
-  
+
   userList.forEach((uid, index) => {
     response += `${index + 1}. <code>${uid}</code>${uid === ADMIN_ID ? ' (Admin)' : ''}\n`;
   });
@@ -4689,7 +4689,7 @@ bot.on('message', async (msg) => {
 
     try {
       // Use the active Gemini models for verification
-      const models = ['gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-flash-lite-latest', 'gemini-3.6-flash'];
+      const models = ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-flash', 'gemini-1.5-pro'];
       let workingModel = null;
       let lastError = null;
       let quotaExceededError = false;
@@ -4750,7 +4750,7 @@ bot.on('message', async (msg) => {
           { parse_mode: 'HTML', reply_markup: getMainKeyboard(chatId) }
         );
         // Refresh pinned dashboard with new status
-        updatePinnedTokenStatus(chatId, true).catch(() => {});
+        updatePinnedTokenStatus(chatId, true).catch(() => { });
       } else {
         throw new Error('Unexpected response from Groq API.');
       }
@@ -4765,7 +4765,7 @@ bot.on('message', async (msg) => {
           `⚠️ <b>Groq Key Valid but Rate Limited</b>\n\nYour key is correct but you've hit the free-tier rate limit. It has been saved — try again in a minute.`,
           { parse_mode: 'HTML', reply_markup: getMainKeyboard(chatId) }
         );
-        updatePinnedTokenStatus(chatId, true).catch(() => {});
+        updatePinnedTokenStatus(chatId, true).catch(() => { });
       } else {
         await bot.sendMessage(chatId,
           `❌ <b>Groq Key Invalid</b>\n\nReason: ${escapeHTML(errMsg)}\n\n💡 Get a free key at <a href="https://console.groq.com/keys">console.groq.com/keys</a>`,
@@ -4784,15 +4784,15 @@ bot.on('message', async (msg) => {
     try {
       const res = await axios.post(
         'https://openrouter.ai/api/v1/chat/completions',
-        { model: 'openai/gpt-oss-20b:free', messages: [{ role: 'user', content: 'hi' }], max_tokens: 2 },
-        { 
-          headers: { 
-            'Authorization': `Bearer ${tempKey}`, 
+        { model: 'meta-llama/llama-3.3-70b-instruct:free', messages: [{ role: 'user', content: 'hi' }], max_tokens: 2 },
+        {
+          headers: {
+            'Authorization': `Bearer ${tempKey}`,
             'Content-Type': 'application/json',
             'HTTP-Referer': 'https://examvault.app',
             'X-Title': 'ExamVault Bot'
-          }, 
-          timeout: 8000 
+          },
+          timeout: 8000
         }
       );
 
@@ -4800,10 +4800,10 @@ bot.on('message', async (msg) => {
         OPENROUTER_API_KEY = tempKey;
         updateEnvFile('OPENROUTER_API_KEY', tempKey);
         await bot.sendMessage(chatId,
-          `✅ <b>OpenRouter Key Verified & Saved!</b>\n\n🌐 <b>Free Models Active:</b> <code>openai/gpt-oss-20b:free</code>, <code>google/gemma-4-31b-it:free</code>\n🔑 Your key has been saved to .env and is ready to use!`,
+          `✅ <b>OpenRouter Key Verified & Saved!</b>\n\n🌐 <b>Free Models Active:</b> <code>meta-llama/llama-3.3-70b-instruct:free</code>, <code>google/gemma-2-9b-it:free</code>\n🔑 Your key has been saved to .env and is ready to use!`,
           { parse_mode: 'HTML', reply_markup: getMainKeyboard(chatId) }
         );
-        updatePinnedTokenStatus(chatId, true).catch(() => {});
+        updatePinnedTokenStatus(chatId, true).catch(() => { });
       } else {
         throw new Error('Unexpected response from OpenRouter API.');
       }
@@ -4817,7 +4817,7 @@ bot.on('message', async (msg) => {
           `⚠️ <b>OpenRouter Key Saved (Rate Limited)</b>\n\nYour key is valid, but free models are temporarily busy upstream. Key is saved!`,
           { parse_mode: 'HTML', reply_markup: getMainKeyboard(chatId) }
         );
-        updatePinnedTokenStatus(chatId, true).catch(() => {});
+        updatePinnedTokenStatus(chatId, true).catch(() => { });
       } else {
         await bot.sendMessage(chatId,
           `❌ <b>OpenRouter Key Invalid</b>\n\nReason: ${escapeHTML(errMsg)}\n\n💡 Get a free key at <a href="https://openrouter.ai/keys">openrouter.ai/keys</a>`,
@@ -5094,10 +5094,10 @@ bot.on('callback_query', async (query) => {
 
     if (data === 'next_question' || data === 'finish_quiz') {
       const quiz = activeQuizzes.get(chatId);
-      if (!quiz) { 
-        bot.answerCallbackQuery(query.id, 'Test session expired. Please start a new one.'); 
+      if (!quiz) {
+        bot.answerCallbackQuery(query.id, 'Test session expired. Please start a new one.');
         bot.sendMessage(chatId, '⚠️ <b>Your test session has expired.</b> Please start a new test from the main menu.', { parse_mode: 'HTML', reply_markup: getMainKeyboard(chatId) });
-        return; 
+        return;
       }
 
 
@@ -5197,7 +5197,7 @@ Include:
 3. Give them a "Pro-Tip" or Mnemonic memory trick to solve such questions in under 30 seconds.
 Keep it strictly under 250 words, encouraging and clear!`;
 
-        const geminiModels = ['gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-flash-lite-latest', 'gemini-3.6-flash'];
+        const geminiModels = ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-flash', 'gemini-1.5-pro'];
         const modelsToTry = LAST_WORKING_GEMINI_MODEL ? [LAST_WORKING_GEMINI_MODEL, ...geminiModels.filter(m => m !== LAST_WORKING_GEMINI_MODEL)] : geminiModels;
         let rawText = '';
 
@@ -5217,7 +5217,7 @@ Keep it strictly under 250 words, encouraging and clear!`;
         }
 
         if (!rawText) throw new Error('AI could not generate explanation at this time.');
-        
+
         // Escape HTML first then carefully re-enable b and i tags
         let htmlText = escapeHTML(rawText)
           .replace(/&lt;b&gt;(.*?)&lt;\/b&gt;/g, '<b>$1</b>')
@@ -5312,14 +5312,14 @@ Keep it strictly under 250 words, encouraging and clear!`;
           [{ text: '🔙 Main Menu', callback_data: 'main_menu' }]
         ]
       };
-      
+
       if (query.message) {
         bot.editMessageText(text, {
           chat_id: chatId,
           message_id: query.message.message_id,
           parse_mode: 'HTML',
           reply_markup: keyboard
-        }).catch(() => {});
+        }).catch(() => { });
       } else {
         bot.sendMessage(chatId, text, { parse_mode: 'HTML', reply_markup: keyboard });
       }
@@ -6257,7 +6257,7 @@ Status: <b>${schedule.status.toUpperCase()}</b>
           keyboard.push([{ text: `Section ${idx + 1}: ${sec.name}`, callback_data: `mock_jump_sec_${idx}` }]);
         });
         keyboard.push([{ text: '🔙 Back to Current Question', callback_data: 'mock_resume_q' }]);
-        bot.editMessageText(text, { chat_id: chatId, message_id: query.message.message_id, parse_mode: 'HTML', reply_markup: { inline_keyboard: keyboard } }).catch(() => {});
+        bot.editMessageText(text, { chat_id: chatId, message_id: query.message.message_id, parse_mode: 'HTML', reply_markup: { inline_keyboard: keyboard } }).catch(() => { });
       }
       bot.answerCallbackQuery(query.id);
       return;

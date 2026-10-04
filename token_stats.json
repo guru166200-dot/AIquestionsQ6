@@ -7,7 +7,7 @@
     "promptTokens": 1279,
     "completionTokens": 1776,
     "totalTokens": 3055,
-    "model": "Gemini (gemini-3.5-flash-lite)"
+    "model": "Gemini (gemini-2.0-flash)"
   },
   "byModel": {
     "gemini": {

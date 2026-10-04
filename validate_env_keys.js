@@ -115,11 +115,11 @@ function httpPost(hostname, path, headers, body, timeout = 8000) {
 /** Validate Gemini API Key — tries multiple models */
 async function validateGemini(key) {
   const models = [
-    'gemini-3.5-flash-lite',
-    'gemini-3.1-flash-lite',
-    'gemini-flash-lite-latest',
+    'gemini-2.5-flash',
     'gemini-3.5-flash',
+    'gemini-3.5-flash-lite',
     'gemini-3.6-flash',
+    'gemini-flash-latest'
   ];
 
   let lastErr = null;
@@ -214,7 +214,7 @@ async function validateOpenAI(key) {
 
 /** Validate Groq API Key */
 async function validateGroq(key) {
-  const models = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'];
+  const models = ['openai/gpt-oss-20b', 'openai/gpt-oss-120b', 'qwen/qwen3.8-27b'];
   for (const model of models) {
     try {
       const res = await httpPost(
@@ -255,11 +255,11 @@ async function validateGroq(key) {
 /** Validate OpenRouter API Key */
 async function validateOpenRouter(key) {
   const freeModels = [
-    'openai/gpt-oss-20b:free',
-    'google/gemma-4-31b-it:free',
-    'nvidia/nemotron-3-nano-30b-a3b:free',
-    'inclusionai/ling-3.0-flash:free',
-    'poolside/laguna-xs-2.1:free'
+    'meta-llama/llama-3.3-70b-instruct:free',
+    'google/gemma-2-9b-it:free',
+    'qwen/qwen-2.5-72b-instruct:free',
+    'mistralai/mistral-7b-instruct:free',
+    'deepseek/deepseek-r1:free'
   ];
 
   let lastErr = null;
