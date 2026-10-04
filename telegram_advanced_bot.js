@@ -255,7 +255,7 @@ async function getLiveTokenStatus(forceRefresh = false) {
     try {
       const res = await axios.post(
         'https://openrouter.ai/api/v1/chat/completions',
-        { model: 'meta-llama/llama-3.3-70b-instruct:free', messages: [{ role: 'user', content: 'hi' }], max_tokens: 2 },
+        { model: 'google/gemma-2-9b-it:free', messages: [{ role: 'user', content: 'hi' }], max_tokens: 2 },
         {
           headers: {
             'Authorization': `Bearer ${openrouterKey}`,
@@ -1843,7 +1843,7 @@ async function generatePyqYearQuestions(examCatalogKey, year, section, subject, 
     // Fallback: OpenRouter
     const openrouterKey = process.env.OPENROUTER_API_KEY || OPENROUTER_API_KEY;
     if (!batchResult && openrouterKey) {
-      for (const model of ['meta-llama/llama-3.3-70b-instruct:free', 'google/gemma-2-9b-it:free', 'qwen/qwen-2.5-72b-instruct:free']) {
+      for (const model of ['google/gemma-2-9b-it:free', 'qwen/qwen-2.5-72b-instruct:free', 'meta-llama/llama-3.1-8b-instruct:free']) {
         try {
           const resp = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
             model, response_format: { type: 'json_object' },
@@ -2408,7 +2408,7 @@ async function generateMockSectionQuestions(exam, section, subject, count, patte
     // Fallback: OpenRouter
     const openrouterKey = process.env.OPENROUTER_API_KEY || OPENROUTER_API_KEY;
     if (!batchResult && openrouterKey) {
-      for (const model of ['meta-llama/llama-3.3-70b-instruct:free', 'google/gemma-2-9b-it:free', 'qwen/qwen-2.5-72b-instruct:free']) {
+      for (const model of ['google/gemma-2-9b-it:free', 'qwen/qwen-2.5-72b-instruct:free', 'meta-llama/llama-3.1-8b-instruct:free']) {
         try {
           const resp = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
             model, response_format: { type: 'json_object' },
@@ -2725,9 +2725,9 @@ async function generateQuestionsWithOpenRouter(topic, exam, subject, count = 10,
   if (!openrouterKey) return null;
   const seed = customSeed || (Date.now().toString(36) + Math.random().toString(36).substring(2, 7));
   const models = [
-    'meta-llama/llama-3.3-70b-instruct:free',
     'google/gemma-2-9b-it:free',
     'qwen/qwen-2.5-72b-instruct:free',
+    'meta-llama/llama-3.1-8b-instruct:free',
     'mistralai/mistral-7b-instruct:free',
     'deepseek/deepseek-r1:free'
   ];
@@ -3440,7 +3440,7 @@ Keep response concise, engaging, and under 300 words.`;
           if (openrouterKey) {
             const orRes = await axios.post(
               'https://openrouter.ai/api/v1/chat/completions',
-              { model: 'meta-llama/llama-3.3-70b-instruct:free', messages: [{ role: 'user', content: prompt }] },
+              { model: 'google/gemma-2-9b-it:free', messages: [{ role: 'user', content: prompt }] },
               { headers: { 'Authorization': `Bearer ${openrouterKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': 'https://examvault.app', 'X-Title': 'ExamVault Bot' }, timeout: 20000 }
             );
             replyText = orRes.data.choices[0].message.content;
@@ -3449,7 +3449,7 @@ Keep response concise, engaging, and under 300 words.`;
       } else if (openrouterKey) {
         const orRes = await axios.post(
           'https://openrouter.ai/api/v1/chat/completions',
-          { model: 'meta-llama/llama-3.3-70b-instruct:free', messages: [{ role: 'user', content: prompt }] },
+          { model: 'google/gemma-2-9b-it:free', messages: [{ role: 'user', content: prompt }] },
           { headers: { 'Authorization': `Bearer ${openrouterKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': 'https://examvault.app', 'X-Title': 'ExamVault Bot' }, timeout: 20000 }
         );
         replyText = orRes.data.choices[0].message.content;
@@ -3622,7 +3622,7 @@ Output JSON ONLY with format:
       if (openrouterKey) {
         try {
           const resp = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
-            model: 'meta-llama/llama-3.3-70b-instruct:free',
+            model: 'google/gemma-2-9b-it:free',
             response_format: { type: 'json_object' },
             messages: [{ role: 'user', content: prompt }]
           }, {
@@ -4787,7 +4787,7 @@ bot.on('message', async (msg) => {
     try {
       const res = await axios.post(
         'https://openrouter.ai/api/v1/chat/completions',
-        { model: 'meta-llama/llama-3.3-70b-instruct:free', messages: [{ role: 'user', content: 'hi' }], max_tokens: 2 },
+        { model: 'google/gemma-2-9b-it:free', messages: [{ role: 'user', content: 'hi' }], max_tokens: 2 },
         {
           headers: {
             'Authorization': `Bearer ${tempKey}`,
@@ -4803,7 +4803,7 @@ bot.on('message', async (msg) => {
         OPENROUTER_API_KEY = tempKey;
         updateEnvFile('OPENROUTER_API_KEY', tempKey);
         await bot.sendMessage(chatId,
-          `✅ <b>OpenRouter Key Verified & Saved!</b>\n\n🌐 <b>Free Models Active:</b> <code>meta-llama/llama-3.3-70b-instruct:free</code>, <code>google/gemma-2-9b-it:free</code>\n🔑 Your key has been saved to .env and is ready to use!`,
+          `✅ <b>OpenRouter Key Verified & Saved!</b>\n\n🌐 <b>Free Models Active:</b> <code>google/gemma-2-9b-it:free</code>, <code>qwen/qwen-2.5-72b-instruct:free</code>\n🔑 Your key has been saved to .env and is ready to use!`,
           { parse_mode: 'HTML', reply_markup: getMainKeyboard(chatId) }
         );
         updatePinnedTokenStatus(chatId, true).catch(() => { });
