@@ -163,7 +163,7 @@ async function getLiveTokenStatus(forceRefresh = false) {
     status.gemini = { ok: false, details: '❌ Key Missing' };
   } else {
     try {
-      const geminiModels = ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-flash', 'gemini-1.5-pro'];
+      const geminiModels = ['gemini-2.5-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.6-flash', 'gemini-flash-latest'];
       const modelToTest = LAST_WORKING_GEMINI_MODEL || geminiModels[0];
       let workingModel = null;
       let lastErr = null;
@@ -1763,10 +1763,11 @@ async function generatePyqYearQuestions(examCatalogKey, year, section, subject, 
 
     // Gemini primary
     const allGeminiModels = [
-      'gemini-2.0-flash',
-      'gemini-2.0-flash-lite',
-      'gemini-1.5-flash',
-      'gemini-1.5-pro'
+      'gemini-2.5-flash',
+      'gemini-3.5-flash',
+      'gemini-3.5-flash-lite',
+      'gemini-3.6-flash',
+      'gemini-flash-latest'
     ];
     const modelsToTry = LAST_WORKING_GEMINI_MODEL
       ? [LAST_WORKING_GEMINI_MODEL, ...allGeminiModels.filter(m => m !== LAST_WORKING_GEMINI_MODEL)]
@@ -2336,10 +2337,11 @@ async function generateMockSectionQuestions(exam, section, subject, count, patte
     const geminiKey = process.env.GEMINI_API_KEY || GEMINI_API_KEY;
     if (geminiKey) {
       const allGeminiModels = [
-        'gemini-2.0-flash',
-        'gemini-2.0-flash-lite',
-        'gemini-1.5-flash',
-        'gemini-1.5-pro'
+        'gemini-2.5-flash',
+        'gemini-3.5-flash',
+        'gemini-3.5-flash-lite',
+        'gemini-3.6-flash',
+        'gemini-flash-latest'
       ];
       const modelsToTry = LAST_WORKING_GEMINI_MODEL
         ? [LAST_WORKING_GEMINI_MODEL, ...allGeminiModels.filter(m => m !== LAST_WORKING_GEMINI_MODEL)]
@@ -2559,10 +2561,11 @@ async function generateQuestionsWithGemini(topic, exam, subject, count = 10, pas
 
   // Active fast models
   const allModels = [
-    'gemini-2.0-flash',
-    'gemini-2.0-flash-lite',
-    'gemini-1.5-flash',
-    'gemini-1.5-pro'
+    'gemini-2.5-flash',
+    'gemini-3.5-flash',
+    'gemini-3.5-flash-lite',
+    'gemini-3.6-flash',
+    'gemini-flash-latest'
   ];
 
   const modelsToTry = LAST_WORKING_GEMINI_MODEL
@@ -3399,7 +3402,7 @@ Structure:
 3. ⚡ Pro-Tip / Mnemonic / Shortcut formula (if applicable)
 Keep response concise, engaging, and under 300 words.`;
 
-    const geminiModels = ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-flash', 'gemini-1.5-pro'];
+    const geminiModels = ['gemini-2.5-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.6-flash', 'gemini-flash-latest'];
     const modelToTry = LAST_WORKING_GEMINI_MODEL ? [LAST_WORKING_GEMINI_MODEL, ...geminiModels.filter(m => m !== LAST_WORKING_GEMINI_MODEL)] : geminiModels;
     let replyText = '';
 
@@ -3594,7 +3597,7 @@ Output JSON ONLY with format:
     let rawResponse = null;
 
     if (GEMINI_API_KEY) {
-      const geminiModels = ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-flash', 'gemini-1.5-pro'];
+      const geminiModels = ['gemini-2.5-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.6-flash', 'gemini-flash-latest'];
       const modelsToTry = LAST_WORKING_GEMINI_MODEL ? [LAST_WORKING_GEMINI_MODEL, ...geminiModels.filter(m => m !== LAST_WORKING_GEMINI_MODEL)] : geminiModels;
       for (const model of modelsToTry) {
         try {
@@ -4689,7 +4692,7 @@ bot.on('message', async (msg) => {
 
     try {
       // Use the active Gemini models for verification
-      const models = ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-flash', 'gemini-1.5-pro'];
+      const models = ['gemini-2.5-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.6-flash', 'gemini-flash-latest'];
       let workingModel = null;
       let lastError = null;
       let quotaExceededError = false;
@@ -5197,7 +5200,7 @@ Include:
 3. Give them a "Pro-Tip" or Mnemonic memory trick to solve such questions in under 30 seconds.
 Keep it strictly under 250 words, encouraging and clear!`;
 
-        const geminiModels = ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-flash', 'gemini-1.5-pro'];
+        const geminiModels = ['gemini-2.5-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.6-flash', 'gemini-flash-latest'];
         const modelsToTry = LAST_WORKING_GEMINI_MODEL ? [LAST_WORKING_GEMINI_MODEL, ...geminiModels.filter(m => m !== LAST_WORKING_GEMINI_MODEL)] : geminiModels;
         let rawText = '';
 
