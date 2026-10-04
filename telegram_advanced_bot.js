@@ -215,11 +215,11 @@ async function getLiveTokenStatus(forceRefresh = false) {
     try {
       const res = await axios.post(
         'https://api.groq.com/openai/v1/chat/completions',
-        { model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: 'hi' }], max_tokens: 2 },
+        { model: 'openai/gpt-oss-20b', messages: [{ role: 'user', content: 'hi' }], max_tokens: 2 },
         { headers: { 'Authorization': `Bearer ${groqKey}`, 'Content-Type': 'application/json' }, timeout: 5000 }
       );
       if (res.data.choices) {
-        status.groq = { ok: true, details: '🟢 ACTIVE (Llama 3.3 70B)' };
+        status.groq = { ok: true, details: '🟢 ACTIVE (GPT-OSS 20B)' };
       }
     } catch (e) {
       const err = e.response?.data?.error?.message || e.message;
@@ -1805,7 +1805,7 @@ async function generatePyqYearQuestions(examCatalogKey, year, section, subject, 
     if (!batchResult) {
       const groqKey = process.env.GROQ_API_KEY || GROQ_API_KEY;
       if (groqKey) {
-        for (const model of ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant']) {
+        for (const model of ['openai/gpt-oss-20b', 'openai/gpt-oss-120b', 'qwen/qwen3.8-27b']) {
           try {
             const resp = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
               model, response_format: { type: 'json_object' },
@@ -2383,7 +2383,7 @@ async function generateMockSectionQuestions(exam, section, subject, count, patte
     if (!batchResult) {
       const groqKey = process.env.GROQ_API_KEY || GROQ_API_KEY;
       if (groqKey) {
-        const groqModels = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'];
+        const groqModels = ['openai/gpt-oss-20b', 'openai/gpt-oss-120b', 'qwen/qwen3.8-27b'];
         for (const model of groqModels) {
           try {
             const resp = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
@@ -3432,7 +3432,7 @@ Keep response concise, engaging, and under 300 words.`;
         try {
           const groqRes = await axios.post(
             'https://api.groq.com/openai/v1/chat/completions',
-            { model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: prompt }] },
+            { model: 'openai/gpt-oss-20b', messages: [{ role: 'user', content: prompt }] },
             { headers: { 'Authorization': `Bearer ${groqKey}`, 'Content-Type': 'application/json' }, timeout: 20000 }
           );
           replyText = groqRes.data.choices[0].message.content;
@@ -4741,7 +4741,7 @@ bot.on('message', async (msg) => {
     try {
       const res = await axios.post(
         'https://api.groq.com/openai/v1/chat/completions',
-        { model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: 'hi' }], max_tokens: 2 },
+        { model: 'openai/gpt-oss-20b', messages: [{ role: 'user', content: 'hi' }], max_tokens: 2 },
         { headers: { 'Authorization': `Bearer ${tempKey}`, 'Content-Type': 'application/json' }, timeout: 8000 }
       );
 
@@ -4749,7 +4749,7 @@ bot.on('message', async (msg) => {
         updateEnvFile('GROQ_API_KEY', tempKey);
         process.env.GROQ_API_KEY = tempKey;
         await bot.sendMessage(chatId,
-          `✅ <b>Groq Key Verified &amp; Saved!</b>\n\n🟣 <b>Model:</b> <code>Llama 3.3 70B (Versatile)</code>\n🔑 Your key has been saved and is now active.`,
+          `✅ <b>Groq Key Verified &amp; Saved!</b>\n\n🟣 <b>Model:</b> <code>GPT-OSS 20B (Groq)</code>\n🔑 Your key has been saved and is now active.`,
           { parse_mode: 'HTML', reply_markup: getMainKeyboard(chatId) }
         );
         // Refresh pinned dashboard with new status
